@@ -1,9 +1,7 @@
 #include "sortfilteritemmodel.hpp"
 
-#include <iostream>
-
 #include <components/misc/stringops.hpp>
-
+#include <components/debug/debuglog.hpp>
 #include <components/esm/loadalch.hpp>
 #include <components/esm/loadappa.hpp>
 #include <components/esm/loadarmo.hpp>
@@ -59,15 +57,89 @@ namespace
             if (mSortByType && left.mType != right.mType)
                 return left.mType < right.mType;
 
-            if (left.mBase.getTypeName() == right.mBase.getTypeName())
-            {
-                std::string leftName = Misc::StringUtils::lowerCase(left.mBase.getClass().getName(left.mBase));
-                std::string rightName = Misc::StringUtils::lowerCase(right.mBase.getClass().getName(right.mBase));
+            float result = 0;
 
-                return leftName.compare(rightName) < 0;
+            // compare items by type
+            std::string leftName = left.mBase.getTypeName();
+            std::string rightName = right.mBase.getTypeName();
+
+            if (leftName != rightName)
+                return compareType(leftName, rightName);
+
+            // compare items by name
+            leftName = Misc::StringUtils::lowerCase(left.mBase.getClass().getName(left.mBase));
+            rightName = Misc::StringUtils::lowerCase(right.mBase.getClass().getName(right.mBase));
+
+            result = leftName.compare(rightName);
+            if (result != 0)
+                return result < 0;
+
+            // compare items by enchantment:
+            // 1. enchanted items showed before non-enchanted
+            // 2. item with lesser charge percent comes after items with more charge percent
+            // 3. item with constant effect comes before items with non-constant effects
+            int leftChargePercent = -1;
+            int rightChargePercent = -1;
+            leftName = left.mBase.getClass().getEnchantment(left.mBase);
+            rightName = right.mBase.getClass().getEnchantment(right.mBase);
+
+            if (!leftName.empty())
+            {
+                const ESM::Enchantment* ench = MWBase::Environment::get().getWorld()->getStore().get<ESM::Enchantment>().search(leftName);
+                if (ench)
+                {
+                    if (ench->mData.mType == ESM::Enchantment::ConstantEffect)
+                        leftChargePercent = 101;
+                    else
+                        leftChargePercent = static_cast<int>(left.mBase.getCellRef().getNormalizedEnchantmentCharge(ench->mData.mCharge) * 100);
+                }
             }
-            else
-                return compareType(left.mBase.getTypeName(), right.mBase.getTypeName());
+
+            if (!rightName.empty())
+            {
+                const ESM::Enchantment* ench = MWBase::Environment::get().getWorld()->getStore().get<ESM::Enchantment>().search(rightName);
+                if (ench)
+                {
+                    if (ench->mData.mType == ESM::Enchantment::ConstantEffect)
+                        rightChargePercent = 101;
+                    else
+                        rightChargePercent = static_cast<int>(right.mBase.getCellRef().getNormalizedEnchantmentCharge(ench->mData.mCharge) * 100);
+                }
+            }
+
+            result = leftChargePercent - rightChargePercent;
+            if (result != 0)
+                return result > 0;
+
+            // compare items by condition
+            if (left.mBase.getClass().hasItemHealth(left.mBase) && right.mBase.getClass().hasItemHealth(right.mBase))
+            {
+                result = left.mBase.getClass().getItemHealth(left.mBase) - right.mBase.getClass().getItemHealth(right.mBase);
+                if (result != 0)
+                    return result > 0;
+            }
+
+            // compare items by remaining usage time
+            result = left.mBase.getClass().getRemainingUsageTime(left.mBase) - right.mBase.getClass().getRemainingUsageTime(right.mBase);
+            if (result != 0)
+                return result > 0;
+
+            // compare items by value
+            result = left.mBase.getClass().getValue(left.mBase) - right.mBase.getClass().getValue(right.mBase);
+            if (result != 0)
+                return result > 0;
+
+            // compare items by weight
+            result = left.mBase.getClass().getWeight(left.mBase) - right.mBase.getClass().getWeight(right.mBase);
+            if (result != 0)
+                return result > 0;
+
+            // compare items by Id
+            leftName = left.mBase.getCellRef().getRefId();
+            rightName = right.mBase.getCellRef().getRefId();
+
+            result = leftName.compare(rightName);
+            return result < 0;
         }
     };
 }
@@ -81,6 +153,11 @@ namespace MWGui
         , mSortByType(true)
     {
         mSourceModel = sourceModel;
+    }
+
+    bool SortFilterItemModel::allowedToUseItems() const
+    {
+        return mSourceModel->allowedToUseItems();
     }
 
     void SortFilterItemModel::addDragItem (const MWWorld::Ptr& dragItem, size_t count)
@@ -127,7 +204,9 @@ namespace MWGui
         if ((mFilter & Filter_OnlyEnchanted) && !(item.mFlags & ItemStack::Flag_Enchanted))
             return false;
         if ((mFilter & Filter_OnlyChargedSoulstones) && (base.getTypeName() != typeid(ESM::Miscellaneous).name()
-                                                     || base.getCellRef().getSoul() == ""))
+                                                     || base.getCellRef().getSoul() == "" || !MWBase::Environment::get().getWorld()->getStore().get<ESM::Creature>().search(base.getCellRef().getSoul())))
+            return false;
+        if ((mFilter & Filter_OnlyRepairTools) && (base.getTypeName() != typeid(ESM::Repair).name()))
             return false;
         if ((mFilter & Filter_OnlyEnchantable) && (item.mFlags & ItemStack::Flag_Enchanted
                                                || (base.getTypeName() != typeid(ESM::Armor).name()
@@ -141,7 +220,7 @@ namespace MWGui
 
         if ((mFilter & Filter_OnlyUsableItems) && base.getClass().getScript(base).empty())
         {
-            boost::shared_ptr<MWWorld::Action> actionOnUse = base.getClass().use(base);
+            std::shared_ptr<MWWorld::Action> actionOnUse = base.getClass().use(base);
             if (!actionOnUse || actionOnUse->isNullAction())
                 return false;
         }
@@ -162,7 +241,7 @@ namespace MWGui
             const ESM::Enchantment* ench = MWBase::Environment::get().getWorld()->getStore().get<ESM::Enchantment>().search(enchId);
             if (!ench)
             {
-                std::cerr << "Can't find enchantment '" << enchId << "' on item " << base.getCellRef().getRefId() << std::endl;
+                Log(Debug::Warning) << "Warning: Can't find enchantment '" << enchId << "' on item " << base.getCellRef().getRefId();
                 return false;
             }
 
@@ -228,4 +307,18 @@ namespace MWGui
         std::sort(mItems.begin(), mItems.end(), cmp);
     }
 
+    void SortFilterItemModel::onClose()
+    {
+        mSourceModel->onClose();
+    }
+
+    bool SortFilterItemModel::onDropItem(const MWWorld::Ptr &item, int count)
+    {
+        return mSourceModel->onDropItem(item, count);
+    }
+
+    bool SortFilterItemModel::onTakeItem(const MWWorld::Ptr &item, int count)
+    {
+        return mSourceModel->onTakeItem(item, count);
+    }
 }

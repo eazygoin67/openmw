@@ -7,14 +7,11 @@
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwworld/ptr.hpp"
-#include "../mwworld/actiontake.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwphysics/physicssystem.hpp"
 #include "../mwworld/actioneat.hpp"
 #include "../mwworld/nullaction.hpp"
-
-#include "../mwmechanics/npcstats.hpp"
 
 #include "../mwgui/tooltips.hpp"
 
@@ -54,7 +51,7 @@ namespace MWClass
         return ref->mBase->mName;
     }
 
-    boost::shared_ptr<MWWorld::Action> Ingredient::activate (const MWWorld::Ptr& ptr,
+    std::shared_ptr<MWWorld::Action> Ingredient::activate (const MWWorld::Ptr& ptr,
         const MWWorld::Ptr& actor) const
     {
         return defaultItemActivate(ptr, actor);
@@ -75,9 +72,9 @@ namespace MWClass
     }
 
 
-    boost::shared_ptr<MWWorld::Action> Ingredient::use (const MWWorld::Ptr& ptr) const
+    std::shared_ptr<MWWorld::Action> Ingredient::use (const MWWorld::Ptr& ptr, bool force) const
     {
-        boost::shared_ptr<MWWorld::Action> action (new MWWorld::ActionEat (ptr));
+        std::shared_ptr<MWWorld::Action> action (new MWWorld::ActionEat (ptr));
 
         action->setSound ("Swallow");
 
@@ -86,7 +83,7 @@ namespace MWClass
 
     void Ingredient::registerSelf()
     {
-        boost::shared_ptr<Class> instance (new Ingredient);
+        std::shared_ptr<Class> instance (new Ingredient);
 
         registerClass (typeid (ESM::Ingredient).name(), instance);
     }
@@ -134,11 +131,10 @@ namespace MWClass
         }
 
         MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
-        MWMechanics::NpcStats& npcStats = player.getClass().getNpcStats (player);
-        int alchemySkill = npcStats.getSkill (ESM::Skill::Alchemy).getBase();
+        int alchemySkill = player.getClass().getSkill(player, ESM::Skill::Alchemy);
 
         static const float fWortChanceValue =
-                MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fWortChanceValue")->getFloat();
+                MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fWortChanceValue")->mValue.getFloat();
 
         MWGui::Widgets::SpellEffectList list;
         for (int i=0; i<4; ++i)

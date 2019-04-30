@@ -1,7 +1,5 @@
 #include "objects.hpp"
 
-#include <cmath>
-
 #include <osg/Group>
 #include <osg/UserDataContainer>
 
@@ -29,8 +27,6 @@ Objects::Objects(Resource::ResourceSystem* resourceSystem, osg::ref_ptr<osg::Gro
 
 Objects::~Objects()
 {
-    for(PtrAnimationMap::iterator iter = mObjects.begin();iter != mObjects.end();++iter)
-        delete iter->second;
     mObjects.clear();
 
     for (CellMap::iterator iter = mCellSceneNodes.begin(); iter != mCellSceneNodes.end(); ++iter)
@@ -40,12 +36,15 @@ Objects::~Objects()
 
 void Objects::insertBegin(const MWWorld::Ptr& ptr)
 {
+    assert(mObjects.find(ptr) == mObjects.end());
+
     osg::ref_ptr<osg::Group> cellnode;
 
     CellMap::iterator found = mCellSceneNodes.find(ptr.getCell());
     if (found == mCellSceneNodes.end())
     {
         cellnode = new osg::Group;
+        cellnode->setName("Cell Root");
         mRootNode->addChild(cellnode);
         mCellSceneNodes[ptr.getCell()] = cellnode;
     }
@@ -72,10 +71,11 @@ void Objects::insertBegin(const MWWorld::Ptr& ptr)
 void Objects::insertModel(const MWWorld::Ptr &ptr, const std::string &mesh, bool animated, bool allowLight)
 {
     insertBegin(ptr);
+    ptr.getRefData().getBaseNode()->setNodeMask(Mask_Object);
 
-    std::auto_ptr<ObjectAnimation> anim (new ObjectAnimation(ptr, mesh, mResourceSystem, animated, allowLight));
+    osg::ref_ptr<ObjectAnimation> anim (new ObjectAnimation(ptr, mesh, mResourceSystem, animated, allowLight));
 
-    mObjects.insert(std::make_pair(ptr, anim.release()));
+    mObjects.insert(std::make_pair(ptr, anim));
 }
 
 void Objects::insertCreature(const MWWorld::Ptr &ptr, const std::string &mesh, bool weaponsShields)
@@ -84,14 +84,15 @@ void Objects::insertCreature(const MWWorld::Ptr &ptr, const std::string &mesh, b
     ptr.getRefData().getBaseNode()->setNodeMask(Mask_Actor);
 
     // CreatureAnimation
-    std::auto_ptr<Animation> anim;
+    osg::ref_ptr<Animation> anim;
 
     if (weaponsShields)
-        anim.reset(new CreatureWeaponAnimation(ptr, mesh, mResourceSystem));
+        anim = new CreatureWeaponAnimation(ptr, mesh, mResourceSystem);
     else
-        anim.reset(new CreatureAnimation(ptr, mesh, mResourceSystem));
+        anim = new CreatureAnimation(ptr, mesh, mResourceSystem);
 
-    mObjects.insert(std::make_pair(ptr, anim.release()));
+    if (mObjects.insert(std::make_pair(ptr, anim)).second)
+        ptr.getClass().getContainerStore(ptr).setContListener(static_cast<ActorAnimation*>(anim.get()));
 }
 
 void Objects::insertNPC(const MWWorld::Ptr &ptr)
@@ -99,9 +100,13 @@ void Objects::insertNPC(const MWWorld::Ptr &ptr)
     insertBegin(ptr);
     ptr.getRefData().getBaseNode()->setNodeMask(Mask_Actor);
 
-    std::auto_ptr<NpcAnimation> anim (new NpcAnimation(ptr, osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), mResourceSystem));
+    osg::ref_ptr<NpcAnimation> anim (new NpcAnimation(ptr, osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), mResourceSystem));
 
-    mObjects.insert(std::make_pair(ptr, anim.release()));
+    if (mObjects.insert(std::make_pair(ptr, anim)).second)
+    {
+        ptr.getClass().getInventoryStore(ptr).setInvListener(anim.get(), ptr);
+        ptr.getClass().getInventoryStore(ptr).setContListener(anim.get());
+    }
 }
 
 bool Objects::removeObject (const MWWorld::Ptr& ptr)
@@ -113,14 +118,21 @@ bool Objects::removeObject (const MWWorld::Ptr& ptr)
     if(iter != mObjects.end())
     {
         if (mUnrefQueue.get())
-            mUnrefQueue->push(iter->second->getObjectRoot());
+            mUnrefQueue->push(iter->second);
 
-        delete iter->second;
         mObjects.erase(iter);
+
+        if (ptr.getClass().isActor())
+        {
+            if (ptr.getClass().hasInventoryStore(ptr))
+                ptr.getClass().getInventoryStore(ptr).setInvListener(nullptr, ptr);
+
+            ptr.getClass().getContainerStore(ptr).setContListener(nullptr);
+        }
 
         ptr.getRefData().getBaseNode()->getParent(0)->removeChild(ptr.getRefData().getBaseNode());
 
-        ptr.getRefData().setBaseNode(NULL);
+        ptr.getRefData().setBaseNode(nullptr);
         return true;
     }
     return false;
@@ -131,11 +143,19 @@ void Objects::removeCell(const MWWorld::CellStore* store)
 {
     for(PtrAnimationMap::iterator iter = mObjects.begin();iter != mObjects.end();)
     {
-        if(iter->first.getCell() == store)
+        MWWorld::Ptr ptr = iter->second->getPtr();
+        if(ptr.getCell() == store)
         {
             if (mUnrefQueue.get())
-                mUnrefQueue->push(iter->second->getObjectRoot());
-            delete iter->second;
+                mUnrefQueue->push(iter->second);
+
+            if (ptr.getClass().isNpc() && ptr.getRefData().getCustomData())
+            {
+                MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore(ptr);
+                invStore.setInvListener(nullptr, ptr);
+                invStore.setContListener(nullptr);
+            }
+
             mObjects.erase(iter++);
         }
         else
@@ -184,7 +204,7 @@ void Objects::updatePtr(const MWWorld::Ptr &old, const MWWorld::Ptr &cur)
     PtrAnimationMap::iterator iter = mObjects.find(old);
     if(iter != mObjects.end())
     {
-        Animation *anim = iter->second;
+        osg::ref_ptr<Animation> anim = iter->second;
         mObjects.erase(iter);
         anim->updatePtr(cur);
         mObjects[cur] = anim;
@@ -197,7 +217,7 @@ Animation* Objects::getAnimation(const MWWorld::Ptr &ptr)
     if(iter != mObjects.end())
         return iter->second;
 
-    return NULL;
+    return nullptr;
 }
 
 const Animation* Objects::getAnimation(const MWWorld::ConstPtr &ptr) const
@@ -206,7 +226,7 @@ const Animation* Objects::getAnimation(const MWWorld::ConstPtr &ptr) const
     if(iter != mObjects.end())
         return iter->second;
 
-    return NULL;
+    return nullptr;
 }
 
 }

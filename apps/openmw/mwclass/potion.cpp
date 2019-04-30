@@ -7,11 +7,9 @@
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwworld/ptr.hpp"
-#include "../mwworld/actiontake.hpp"
 #include "../mwworld/actionapply.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/esmstore.hpp"
-#include "../mwworld/containerstore.hpp"
 #include "../mwphysics/physicssystem.hpp"
 #include "../mwworld/nullaction.hpp"
 
@@ -55,7 +53,7 @@ namespace MWClass
         return ref->mBase->mName;
     }
 
-    boost::shared_ptr<MWWorld::Action> Potion::activate (const MWWorld::Ptr& ptr,
+    std::shared_ptr<MWWorld::Action> Potion::activate (const MWWorld::Ptr& ptr,
         const MWWorld::Ptr& actor) const
     {
         return defaultItemActivate(ptr, actor);
@@ -78,7 +76,7 @@ namespace MWClass
 
     void Potion::registerSelf()
     {
-        boost::shared_ptr<Class> instance (new Potion);
+        std::shared_ptr<Class> instance (new Potion);
 
         registerClass (typeid (ESM::Potion).name(), instance);
     }
@@ -139,12 +137,12 @@ namespace MWClass
         return info;
     }
 
-    boost::shared_ptr<MWWorld::Action> Potion::use (const MWWorld::Ptr& ptr) const
+    std::shared_ptr<MWWorld::Action> Potion::use (const MWWorld::Ptr& ptr, bool force) const
     {
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
 
-        boost::shared_ptr<MWWorld::Action> action (
+        std::shared_ptr<MWWorld::Action> action (
             new MWWorld::ActionApply (ptr, ref->mBase->mId));
 
         action->setSound ("Drink");

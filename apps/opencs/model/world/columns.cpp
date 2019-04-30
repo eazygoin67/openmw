@@ -1,5 +1,6 @@
 #include "columns.hpp"
 
+#include <components/fallback/fallback.hpp>
 #include <components/misc/stringops.hpp>
 
 #include "universalid.hpp"
@@ -66,7 +67,7 @@ namespace CSMWorld
             { ColumnId_SleepForbidden, "Sleep Forbidden" },
             { ColumnId_InteriorWater, "Interior Water" },
             { ColumnId_InteriorSky, "Interior Sky" },
-            { ColumnId_Model, "Model" },
+            { ColumnId_Model, "Model/Animation" },
             { ColumnId_Script, "Script" },
             { ColumnId_Icon, "Icon" },
             { ColumnId_Weight, "Weight" },
@@ -98,22 +99,22 @@ namespace CSMWorld
             { ColumnId_ArmorType, "Armor Type" },
             { ColumnId_Health, "Health" },
             { ColumnId_ArmorValue, "Armor Value" },
-            { ColumnId_Scroll, "Scroll" },
+            { ColumnId_BookType, "Book Type" },
             { ColumnId_ClothingType, "Clothing Type" },
             { ColumnId_WeightCapacity, "Weight Capacity" },
             { ColumnId_OrganicContainer, "Organic Container" },
             { ColumnId_Respawn, "Respawn" },
             { ColumnId_CreatureType, "Creature Type" },
             { ColumnId_SoulPoints, "Soul Points" },
-            { ColumnId_OriginalCreature, "Original Creature" },
+            { ColumnId_ParentCreature, "Parent Creature" },
             { ColumnId_Biped, "Biped" },
             { ColumnId_HasWeapon, "Has Weapon" },
             { ColumnId_Swims, "Swims" },
             { ColumnId_Flies, "Flies" },
             { ColumnId_Walks, "Walks" },
             { ColumnId_Essential, "Essential" },
-            { ColumnId_SkeletonBlood, "Skeleton Blood" },
-            { ColumnId_MetalBlood, "Metal Blood" },
+            { ColumnId_BloodType, "Blood Type" },
+
             { ColumnId_OpenSound, "Open Sound" },
             { ColumnId_CloseSound, "Close Sound" },
             { ColumnId_Duration, "Duration" },
@@ -123,10 +124,8 @@ namespace CSMWorld
             { ColumnId_Dynamic, "Dynamic" },
             { ColumnId_Portable, "Portable" },
             { ColumnId_NegativeLight, "Negative Light" },
-            { ColumnId_Flickering, "Flickering" },
-            { ColumnId_SlowFlickering, "Slow Flickering" },
-            { ColumnId_Pulsing, "Pulsing" },
-            { ColumnId_SlowPulsing, "Slow Pulsing" },
+            { ColumnId_EmitterType, "Emitter Type" },
+
             { ColumnId_Fire, "Fire" },
             { ColumnId_OffByDefault, "Off by default" },
             { ColumnId_IsKey, "Is Key" },
@@ -236,8 +235,16 @@ namespace CSMWorld
             { ColumnId_SoundChance, "Chance" },
 
             { ColumnId_FactionReactions, "Reactions" },
+            { ColumnId_FactionRanks, "Ranks" },
             //{ ColumnId_FactionID, "Faction ID" },
             { ColumnId_FactionReaction, "Reaction" },
+
+            { ColumnId_FactionAttrib1, "Attrib 1" },
+            { ColumnId_FactionAttrib2, "Attrib 2" },
+            { ColumnId_FactionPrimSkill, "Prim Skill" },
+            { ColumnId_FactionFavSkill, "Fav Skill" },
+            { ColumnId_FactionRep, "Fact Rep" },
+            { ColumnId_RankName, "Rank Name" },
 
             { ColumnId_EffectList, "Effects" },
             { ColumnId_EffectId, "Effect" },
@@ -285,6 +292,7 @@ namespace CSMWorld
             { ColumnId_NpcMisc, "NPC Misc" },
             { ColumnId_Level, "Level" },
             { ColumnId_NpcFactionID, "Faction ID" },
+            { ColumnId_GenderNpc, "Gender"},
             { ColumnId_Mana, "Mana" },
             { ColumnId_Fatigue, "Fatigue" },
             { ColumnId_NpcDisposition, "NPC Disposition" },
@@ -331,6 +339,14 @@ namespace CSMWorld
             { ColumnId_WeatherChance, "Percent Chance" },
 
             { ColumnId_Text, "Text" },
+            { ColumnId_TextureNickname, "Texture Nickname" },
+            { ColumnId_PluginIndex, "Plugin Index" },
+            { ColumnId_TextureIndex, "Texture Index" },
+            { ColumnId_LandMapLodIndex, "Land map height LOD" },
+            { ColumnId_LandNormalsIndex, "Land normals" },
+            { ColumnId_LandHeightsIndex, "Land heights" },
+            { ColumnId_LandColoursIndex, "Land colors" },
+            { ColumnId_LandTexturesIndex, "Land textures" },
 
             { ColumnId_UseValue1, "Use value 1" },
             { ColumnId_UseValue2, "Use value 2" },
@@ -553,6 +569,16 @@ namespace
         "AI Wander", "AI Travel", "AI Follow", "AI Escort", "AI Activate", 0
     };
 
+    static const char *sBookType[] =
+    {
+        "Book", "Scroll", 0
+    };
+
+    static const char *sEmitterType[] =
+    {
+        "<None>", "Flickering", "Flickering (Slow)", "Pulsing", "Pulsing (Slow)", 0
+    };
+
     const char **getEnumNames (CSMWorld::Columns::ColumnId column)
     {
         switch (column)
@@ -582,6 +608,8 @@ namespace
             case CSMWorld::Columns::ColumnId_AiPackageType: return sAiPackageType;
             case CSMWorld::Columns::ColumnId_InfoCondFunc: return CSMWorld::ConstInfoSelectWrapper::FunctionEnumStrings;
             case CSMWorld::Columns::ColumnId_InfoCondComp: return CSMWorld::ConstInfoSelectWrapper::RelationEnumStrings;
+            case CSMWorld::Columns::ColumnId_BookType: return sBookType;
+            case CSMWorld::Columns::ColumnId_EmitterType: return sEmitterType;
 
             default: return 0;
         }
@@ -593,19 +621,28 @@ bool CSMWorld::Columns::hasEnums (ColumnId column)
     return getEnumNames (column)!=0 || column==ColumnId_RecordType;
 }
 
-std::vector<std::string> CSMWorld::Columns::getEnums (ColumnId column)
+std::vector<std::pair<int,std::string>>CSMWorld::Columns::getEnums (ColumnId column)
 {
-    std::vector<std::string> enums;
+    std::vector<std::pair<int,std::string>> enums;
 
     if (const char **table = getEnumNames (column))
         for (int i=0; table[i]; ++i)
-            enums.push_back (table[i]);
+            enums.emplace_back(i, table[i]);
+    else if (column==ColumnId_BloodType)
+    {
+        for (int i=0; i<8; i++)
+        {
+            const std::string& bloodName = Fallback::Map::getString("Blood_Texture_Name_" + std::to_string(i));
+            if (!bloodName.empty())
+                enums.emplace_back(i, bloodName);
+        }
+    }
     else if (column==ColumnId_RecordType)
     {
-        enums.push_back (""); // none
+        enums.emplace_back(UniversalId::Type_None, ""); // none
 
         for (int i=UniversalId::Type_None+1; i<UniversalId::NumberOfTypes; ++i)
-            enums.push_back (UniversalId (static_cast<UniversalId::Type> (i)).getTypeName());
+            enums.emplace_back (i, UniversalId (static_cast<UniversalId::Type> (i)).getTypeName());
     }
 
     return enums;

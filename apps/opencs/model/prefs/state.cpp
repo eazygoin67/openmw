@@ -3,7 +3,6 @@
 
 #include <stdexcept>
 #include <algorithm>
-#include <sstream>
 
 #include "intsetting.hpp"
 #include "doublesetting.hpp"
@@ -123,6 +122,7 @@ void CSMPrefs::State::declare()
     declareEnum ("double-s", "Shift Double Click", actionRemove).addValues (reportValues);
     declareEnum ("double-c", "Control Double Click", actionEditAndRemove).addValues (reportValues);
     declareEnum ("double-sc", "Shift Control Double Click", actionNone).addValues (reportValues);
+    declareBool("ignore-base-records", "Ignore base records in verifier", false);
 
     declareCategory ("Search & Replace");
     declareInt ("char-before", "Characters before search string", 10).
@@ -152,6 +152,8 @@ void CSMPrefs::State::declare()
         setRange (0, 10000);
     declareInt ("error-height", "Initial height of the error panel", 100).
         setRange (100, 10000);
+    declareBool ("highlight-occurrences", "Highlight other occurrences of selected names", true);
+    declareColour ("colour-highlight", "Colour of highlighted occurrences", QColor("lightcyan"));
     declareSeparator();
     declareColour ("colour-int", "Highlight Colour: Integer Literals", QColor ("darkmagenta"));
     declareColour ("colour-float", "Highlight Colour: Float Literals", QColor ("magenta"));
@@ -167,18 +169,25 @@ void CSMPrefs::State::declare()
         "list go to the first/last item");
 
     declareCategory ("3D Scene Input");
+    
+    declareDouble ("navi-wheel-factor", "Camera Zoom Sensitivity", 8).setRange(-100.0, 100.0);
+    declareDouble ("s-navi-sensitivity", "Secondary Camera Movement Sensitivity", 50.0).setRange(-1000.0, 1000.0);
+    declareSeparator();
+
     declareDouble ("p-navi-free-sensitivity", "Free Camera Sensitivity", 1/650.).setPrecision(5).setRange(0.0, 1.0);
     declareBool ("p-navi-free-invert", "Invert Free Camera Mouse Input", false);
+    declareDouble ("navi-free-lin-speed", "Free Camera Linear Speed", 1000.0).setRange(1.0, 10000.0);
+    declareDouble ("navi-free-rot-speed", "Free Camera Rotational Speed", 3.14 / 2).setRange(0.001, 6.28);    
+    declareDouble ("navi-free-speed-mult", "Free Camera Speed Multiplier (from Modifier)", 8).setRange(0.001, 1000.0);
+    declareSeparator();
+
     declareDouble ("p-navi-orbit-sensitivity", "Orbit Camera Sensitivity", 1/650.).setPrecision(5).setRange(0.0, 1.0);
     declareBool ("p-navi-orbit-invert", "Invert Orbit Camera Mouse Input", false);
-    declareDouble ("s-navi-sensitivity", "Secondary Camera Movement Sensitivity", 50.0).setRange(-1000.0, 1000.0);
-    declareDouble ("navi-wheel-factor", "Camera Zoom Sensitivity", 8).setRange(-100.0, 100.0);
-    declareDouble ("navi-free-lin-speed", "Free Camera Linear Speed", 1000.0).setRange(1.0, 10000.0);
-    declareDouble ("navi-free-rot-speed", "Free Camera Rotational Speed", 3.14 / 2).setRange(0.001, 6.28);
-    declareDouble ("navi-free-speed-mult", "Free Camera Speed Multiplier (from Modifier)", 8).setRange(0.001, 1000.0);
     declareDouble ("navi-orbit-rot-speed", "Orbital Camera Rotational Speed", 3.14 / 4).setRange(0.001, 6.28);
     declareDouble ("navi-orbit-speed-mult", "Orbital Camera Speed Multiplier (from Modifier)", 4).setRange(0.001, 1000.0);
+    declareBool ("navi-orbit-const-roll", "Keep camera roll constant for orbital camera", true);
     declareSeparator();
+
     declareBool ("context-select", "Context Sensitive Selection", false);
     declareDouble ("drag-factor", "Mouse sensitivity during drag operations", 1.0).
         setRange (0.001, 100.0);
@@ -189,6 +198,17 @@ void CSMPrefs::State::declare()
         setTooltip ("Acceleration factor during drag operations while holding down shift").
         setRange (0.001, 100.0);
     declareDouble ("rotate-factor", "Free rotation factor", 0.007).setPrecision(4).setRange(0.0001, 0.1);
+
+    declareCategory ("Rendering");
+    declareInt ("framerate-limit", "FPS limit", 60).
+        setTooltip("Framerate limit in 3D preview windows. Zero value means \"unlimited\".").
+        setRange(0, 10000);
+    declareInt ("camera-fov", "Camera FOV", 90).setRange(10, 170);
+    declareBool ("camera-ortho", "Orthographic projection for camera", false);
+    declareInt ("camera-ortho-size", "Orthographic projection size parameter", 100).
+        setTooltip("Size of the orthographic frustum, greater value will allow the camera to see more of the world.").
+        setRange(10, 10000);
+    declareDouble ("object-marker-alpha", "Object Marker Transparency", 0.5).setPrecision(2).setRange(0,1);
 
     declareCategory ("Tooltips");
     declareBool ("scene", "Show Tooltips in 3D scenes", true);
@@ -205,7 +225,15 @@ void CSMPrefs::State::declare()
     EnumValues insertOutsideVisibleCell;
     insertOutsideVisibleCell.add (showAndInsert).add (dontInsert).add (insertAnyway);
 
-    declareCategory ("Scene Drops");
+    EnumValue createAndLandEdit ("Create cell and land, then edit");
+    EnumValue showAndLandEdit ("Show cell and edit");
+    EnumValue dontLandEdit ("Discard");
+    EnumValues landeditOutsideCell;
+    landeditOutsideCell.add (createAndLandEdit).add (dontLandEdit);
+    EnumValues landeditOutsideVisibleCell;
+    landeditOutsideVisibleCell.add (showAndLandEdit).add (dontLandEdit);
+
+    declareCategory ("3D Scene Editing");
     declareInt ("distance", "Drop Distance", 50).
         setTooltip ("If an instance drop can not be placed against another object at the "
             "insert point, it will be placed by this distance from the insert point instead");
@@ -213,6 +241,12 @@ void CSMPrefs::State::declare()
         addValues (insertOutsideCell);
     declareEnum ("outside-visible-drop", "Handling drops outside of visible cells", showAndInsert).
         addValues (insertOutsideVisibleCell);
+    declareEnum ("outside-landedit", "Handling land edit outside of cells", createAndLandEdit).
+        addValues (landeditOutsideCell);
+    declareEnum ("outside-visible-landedit", "Handling land edit outside of visible cells", showAndLandEdit).
+        addValues (landeditOutsideVisibleCell);
+    declareInt ("texturebrush-maximumsize", "Maximum texture brush size", 50).
+        setMin (1);
 
     declareCategory ("Key Bindings");
 
@@ -238,6 +272,8 @@ void CSMPrefs::State::declare()
     declareShortcut ("document-world-cells", "Open Cell List", QKeySequence());
     declareShortcut ("document-world-referencables", "Open Object List", QKeySequence());
     declareShortcut ("document-world-references", "Open Instance List", QKeySequence());
+    declareShortcut ("document-world-lands", "Open Lands List", QKeySequence());
+    declareShortcut ("document-world-landtextures", "Open Land Textures List", QKeySequence());
     declareShortcut ("document-world-pathgrid", "Open Pathgrid List", QKeySequence());
     declareShortcut ("document-world-regionmap", "Open Region Map", QKeySequence());
     declareShortcut ("document-mechanics-globals", "Open Global List", QKeySequence());
@@ -257,6 +293,7 @@ void CSMPrefs::State::declare()
     declareShortcut ("document-character-topicinfos", "Open Topic Info List", QKeySequence());
     declareShortcut ("document-character-journalinfos", "Open Journal Info List", QKeySequence());
     declareShortcut ("document-character-bodyparts", "Open Body Part List", QKeySequence());
+    declareShortcut ("document-assets-reload", "Reload Assets", QKeySequence(Qt::Key_F5));
     declareShortcut ("document-assets-sounds", "Open Sound Asset List", QKeySequence());
     declareShortcut ("document-assets-soundgens", "Open Sound Generator List", QKeySequence());
     declareShortcut ("document-assets-meshes", "Open Mesh Asset List", QKeySequence());
@@ -267,18 +304,20 @@ void CSMPrefs::State::declare()
     declareShortcut ("document-assets-videos", "Open Video Asset List", QKeySequence());
     declareShortcut ("document-debug-run", "Run Debug", QKeySequence());
     declareShortcut ("document-debug-shutdown", "Stop Debug", QKeySequence());
+    declareShortcut ("document-debug-profiles", "Debug Profiles", QKeySequence());
     declareShortcut ("document-debug-runlog", "Open Run Log", QKeySequence());
 
     declareSubcategory ("Table");
     declareShortcut ("table-edit", "Edit Record", QKeySequence());
     declareShortcut ("table-add", "Add Row/Record", QKeySequence(Qt::ShiftModifier | Qt::Key_A));
     declareShortcut ("table-clone", "Clone Record", QKeySequence(Qt::ShiftModifier | Qt::Key_D));
+    declareShortcut ("touch-record", "Touch Record", QKeySequence());
     declareShortcut ("table-revert", "Revert Record", QKeySequence());
     declareShortcut ("table-remove", "Remove Row/Record", QKeySequence(Qt::Key_Delete));
     declareShortcut ("table-moveup", "Move Record Up", QKeySequence());
     declareShortcut ("table-movedown", "Move Record Down", QKeySequence());
-    declareShortcut ("table-view", "View Record", QKeySequence());
-    declareShortcut ("table-preview", "Preview Record", QKeySequence());
+    declareShortcut ("table-view", "View Record", QKeySequence(Qt::ShiftModifier | Qt::Key_C));
+    declareShortcut ("table-preview", "Preview Record", QKeySequence(Qt::ShiftModifier | Qt::Key_V));
     declareShortcut ("table-extendeddelete", "Extended Record Deletion", QKeySequence());
     declareShortcut ("table-extendedrevert", "Extended Record Revertion", QKeySequence());
 
@@ -326,6 +365,10 @@ void CSMPrefs::State::declare()
     declareShortcut ("orbit-roll-right", "Roll Right", QKeySequence(Qt::Key_E));
     declareShortcut ("orbit-speed-mode", "Toggle Speed Mode", QKeySequence(Qt::Key_F));
     declareShortcut ("orbit-center-selection", "Center On Selected", QKeySequence(Qt::Key_C));
+
+    declareSubcategory ("Script Editor");
+    declareShortcut ("script-editor-comment", "Comment Selection", QKeySequence());
+    declareShortcut ("script-editor-uncomment", "Uncomment Selection", QKeySequence());
 }
 
 void CSMPrefs::State::declareCategory (const std::string& key)
@@ -349,9 +392,7 @@ CSMPrefs::IntSetting& CSMPrefs::State::declareInt (const std::string& key,
     if (mCurrentCategory==mCategories.end())
         throw std::logic_error ("no category for setting");
 
-    std::ostringstream stream;
-    stream << default_;
-    setDefault (key, stream.str());
+    setDefault(key, std::to_string(default_));
 
     default_ = mSettings.getInt (key, mCurrentCategory->second.getKey());
 
@@ -370,9 +411,7 @@ CSMPrefs::DoubleSetting& CSMPrefs::State::declareDouble (const std::string& key,
     if (mCurrentCategory==mCategories.end())
         throw std::logic_error ("no category for setting");
 
-    std::ostringstream stream;
-    stream << default_;
-    setDefault (key, stream.str());
+    setDefault(key, std::to_string(default_));
 
     default_ = mSettings.getFloat (key, mCurrentCategory->second.getKey());
 
@@ -579,6 +618,41 @@ CSMPrefs::State& CSMPrefs::State::get()
         throw std::logic_error ("No instance of CSMPrefs::State");
 
     return *sThis;
+}
+
+void CSMPrefs::State::resetCategory(const std::string& category)
+{
+    for (Settings::CategorySettingValueMap::iterator i = mSettings.mUserSettings.begin();
+         i != mSettings.mUserSettings.end(); ++i)
+    {
+        // if the category matches
+        if (i->first.first == category)
+        {
+            // mark the setting as changed
+            mSettings.mChangedSettings.insert(std::make_pair(i->first.first, i->first.second));
+            // reset the value to the default
+            i->second = mSettings.mDefaultSettings[i->first];
+        }
+    }
+
+    Collection::iterator container = mCategories.find(category);
+    if (container != mCategories.end())
+    {
+        Category settings = container->second;
+        for (Category::Iterator i = settings.begin(); i != settings.end(); ++i)
+        {
+            (*i)->updateWidget();
+            update(**i);
+        }
+    }
+}
+
+void CSMPrefs::State::resetAll()
+{
+    for (Collection::iterator iter = mCategories.begin(); iter != mCategories.end(); ++iter)
+    {
+        resetCategory(iter->first);
+    }
 }
 
 

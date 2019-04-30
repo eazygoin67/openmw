@@ -1,18 +1,9 @@
 #include "configurationmanager.hpp"
 
-#include <string>
-#include <iostream>
-#include <algorithm>
-#include <ctype.h>
-
+#include <components/debug/debuglog.hpp>
 #include <components/files/escape.hpp>
 
-#include <boost/bind.hpp>
-#include <boost/algorithm/string/erase.hpp>
-#include <boost/algorithm/string/replace.hpp>
 #include <boost/filesystem/fstream.hpp>
-#include <boost/iostreams/filtering_stream.hpp>
-
 /**
  * \namespace Files
  */
@@ -81,8 +72,6 @@ void ConfigurationManager::processPaths(Files::PathContainer& dataDirs, bool cre
     for (Files::PathContainer::iterator it = dataDirs.begin(); it != dataDirs.end(); ++it)
     {
         path = it->string();
-        boost::erase_all(path, "\"");
-        *it = boost::filesystem::path(path);
 
         // Check if path contains a token
         if (!path.empty() && *path.begin() == '?')
@@ -130,7 +119,7 @@ void ConfigurationManager::processPaths(Files::PathContainer& dataDirs, bool cre
     }
 
     dataDirs.erase(std::remove_if(dataDirs.begin(), dataDirs.end(),
-        boost::bind(&boost::filesystem::path::empty, _1)), dataDirs.end());
+        std::bind(&boost::filesystem::path::empty, std::placeholders::_1)), dataDirs.end());
 }
 
 bool ConfigurationManager::loadConfig(const boost::filesystem::path& path,
@@ -142,7 +131,7 @@ bool ConfigurationManager::loadConfig(const boost::filesystem::path& path,
     if (boost::filesystem::is_regular_file(cfgFile))
     {
         if (!mSilent)
-            std::cout << "Loading config file: " << cfgFile.string() << "... ";
+            Log(Debug::Info) << "Loading config file: " << cfgFile.string();
 
         boost::filesystem::ifstream configFileStreamUnfiltered(cfgFile);
         boost::iostreams::filtering_istream configFileStream;
@@ -153,14 +142,13 @@ bool ConfigurationManager::loadConfig(const boost::filesystem::path& path,
             boost::program_options::store(boost::program_options::parse_config_file(
                 configFileStream, description, true), variables);
 
-            if (!mSilent)
-                std::cout << "done." << std::endl;
             return true;
         }
         else
         {
             if (!mSilent)
-                std::cout << "failed." << std::endl;
+                Log(Debug::Error) << "Loading failed.";
+
             return false;
         }
     }

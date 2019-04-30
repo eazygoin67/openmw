@@ -15,7 +15,9 @@
 #include "../widget/scenetooltoggle.hpp"
 #include "../widget/scenetooltoggle2.hpp"
 
+#include "cameracontroller.hpp"
 #include "mask.hpp"
+#include "tagbase.hpp"
 
 void CSVRender::UnpagedWorldspaceWidget::update()
 {
@@ -25,6 +27,11 @@ void CSVRender::UnpagedWorldspaceWidget::update()
     osg::Vec4f colour = SceneUtil::colourFromRGB(record.get().mAmbi.mAmbient);
 
     setDefaultAmbient (colour);
+
+    bool isInterior = (record.get().mData.mFlags & ESM::Cell::Interior) != 0;
+    bool behaveLikeExterior = (record.get().mData.mFlags & ESM::Cell::QuasiEx) != 0;
+
+    setExterior(behaveLikeExterior || !isInterior);
 
     /// \todo deal with mSunlight and mFog/mForDensity
 
@@ -44,6 +51,9 @@ CSVRender::UnpagedWorldspaceWidget::UnpagedWorldspaceWidget (const std::string& 
         this, SLOT (cellDataChanged (const QModelIndex&, const QModelIndex&)));
     connect (mCellsModel, SIGNAL (rowsAboutToBeRemoved (const QModelIndex&, int, int)),
         this, SLOT (cellRowsAboutToBeRemoved (const QModelIndex&, int, int)));
+
+    connect (&document.getData(), SIGNAL (assetTablesChanged ()),
+        this, SLOT (assetTablesChanged ()));
 
     update();
 
@@ -80,6 +90,12 @@ void CSVRender::UnpagedWorldspaceWidget::cellRowsAboutToBeRemoved (const QModelI
         emit closeRequest();
 }
 
+void CSVRender::UnpagedWorldspaceWidget::assetTablesChanged()
+{
+    if (mCell)
+        mCell->reloadAssets();
+}
+
 bool CSVRender::UnpagedWorldspaceWidget::handleDrop (const std::vector<CSMWorld::UniversalId>& universalIdData, DropType type)
 {
     if (WorldspaceWidget::handleDrop (universalIdData, type))
@@ -91,6 +107,8 @@ bool CSVRender::UnpagedWorldspaceWidget::handleDrop (const std::vector<CSMWorld:
     mCellId = universalIdData.begin()->getId();
 
     mCell.reset (new Cell (getDocument().getData(), mRootNode, mCellId));
+    mCamPositionSet = false;
+    mOrbitCamControl->reset();
 
     update();
     emit cellChanged(*universalIdData.begin());

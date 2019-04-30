@@ -9,9 +9,10 @@ namespace MWRender
         Render_CollisionDebug,
         Render_Wireframe,
         Render_Pathgrid,
-        Render_BoundingBoxes,
         Render_Water,
-        Render_Scene
+        Render_Scene,
+        Render_NavMesh,
+        Render_ActorsPaths,
     };
 
 }

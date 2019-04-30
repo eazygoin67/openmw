@@ -1,8 +1,6 @@
 #ifndef CS_EDITOR_H
 #define CS_EDITOR_H
 
-#include <memory>
-
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/filesystem/fstream.hpp>
 
@@ -30,11 +28,6 @@
 
 #include "view/tools/merge.hpp"
 
-namespace VFS
-{
-    class Manager;
-}
-
 namespace CSMDoc
 {
     class Document;
@@ -46,13 +39,9 @@ namespace CS
     {
             Q_OBJECT
 
-            // FIXME: should be moved to document, so we can have different resources for each opened project
-            std::auto_ptr<VFS::Manager> mVFS;
-
             Files::ConfigurationManager mCfgMgr;
             CSMPrefs::State mSettingsState;
             CSMDoc::DocumentManager mDocumentManager;
-            CSVDoc::ViewManager mViewManager;
             CSVDoc::StartupDialogue mStartup;
             CSVDoc::NewGameDialogue mNewGame;
             CSVPrefs::Dialogue mSettings;
@@ -64,6 +53,7 @@ namespace CS
             boost::filesystem::ofstream mPidFile;
             bool mFsStrict;
             CSVTools::Merge mMerge;
+            CSVDoc::ViewManager* mViewManager;
 
             void setupDataFiles (const Files::PathContainer& dataDirs);
 
@@ -76,7 +66,7 @@ namespace CS
 
         public:
 
-            Editor ();
+            Editor (int argc, char **argv);
             ~Editor ();
 
             bool makeIPCServer();

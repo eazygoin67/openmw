@@ -1,7 +1,5 @@
 #include "spells.hpp"
 
-#include <cstdlib>
-
 #include <components/esm/loadspel.hpp>
 #include <components/esm/spellstate.hpp>
 #include <components/misc/rng.hpp>
@@ -96,7 +94,10 @@ namespace MWMechanics
                 for (unsigned int i=0; i<spell->mEffects.mList.size();++i)
                 {
                     if (spell->mEffects.mList[i].mMagnMin != spell->mEffects.mList[i].mMagnMax)
-                        random[i] = Misc::Rng::rollClosedProbability();
+                    {
+                        int delta = spell->mEffects.mList[i].mMagnMax - spell->mEffects.mList[i].mMagnMin;
+                        random[i] = Misc::Rng::rollDice(delta + 1) / static_cast<float>(delta);
+                    }
                 }
             }
 
@@ -276,6 +277,25 @@ namespace MWMechanics
             }
             else
                 ++iter;
+        }
+    }
+
+    void Spells::removeEffects(const std::string &id)
+    {
+        if (isSpellActive(id))
+        {
+            for (TContainer::iterator spell = mSpells.begin(); spell != mSpells.end(); ++spell)
+            {
+                if (spell->first == getSpell(id))
+                {
+                    for (long unsigned int i = 0; i != spell->first->mEffects.mList.size(); i++)
+                    {
+                        spell->second.mPurgedEffects.insert(i);
+                    }
+                }
+            }
+
+            mSpellsChanged = true;
         }
     }
 

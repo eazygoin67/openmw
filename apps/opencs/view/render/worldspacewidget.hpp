@@ -1,8 +1,6 @@
 #ifndef OPENCS_VIEW_WORLDSPACEWIDGET_H
 #define OPENCS_VIEW_WORLDSPACEWIDGET_H
 
-#include <boost/shared_ptr.hpp>
-
 #include <QTimer>
 #include <osg/Vec3>
 
@@ -67,6 +65,7 @@ namespace CSVRender
             QPoint mToolTipPos;
             bool mShowToolTips;
             int mToolTipDelay;
+            bool mInConstructor;
 
         public:
 

@@ -12,7 +12,6 @@
 #include "../mwbase/soundmanager.hpp"
 
 #include "../mwworld/class.hpp"
-#include "../mwworld/esmstore.hpp"
 #include "../mwworld/cellstore.hpp"
 
 #include "../mwmechanics/creaturestats.hpp"
@@ -41,6 +40,7 @@ namespace MWGui
         {
             MyGUI::TextBox* t;
             getWidget(t, "AttribVal" + MyGUI::utility::toString(i));
+            mAttributeValues.push_back(t);
 
             MyGUI::Button* b;
             getWidget(b, "Attrib" + MyGUI::utility::toString(i));
@@ -48,10 +48,7 @@ namespace MWGui
             b->eventMouseButtonClick += MyGUI::newDelegate(this, &LevelupDialog::onAttributeClicked);
             mAttributes.push_back(b);
 
-            mAttributeValues.push_back(t);
-
             getWidget(t, "AttribMultiplier" + MyGUI::utility::toString(i));
-
             mAttributeMultipliers.push_back(t);
         }
 
@@ -89,7 +86,7 @@ namespace MWGui
 
     void LevelupDialog::resetCoins()
     {
-        const int coinSpacing = 10;
+        const int coinSpacing = 33;
         int curX = mCoinBox->getWidth()/2 - (coinSpacing*(mCoinCount - 1) + 16*mCoinCount)/2;
         for (unsigned int i=0; i<sMaxCoins; ++i)
         {
@@ -128,7 +125,7 @@ namespace MWGui
         setAttributeValues();
     }
 
-    void LevelupDialog::open()
+    void LevelupDialog::onOpen()
     {
         MWBase::World *world = MWBase::Environment::get().getWorld();
         MWWorld::Ptr player = world->getPlayerPtr();
@@ -143,10 +140,10 @@ namespace MWGui
         mLevelText->setCaptionWithReplacing("#{sLevelUpMenu1} " + MyGUI::utility::toString(level));
 
         std::string levelupdescription;
-        if(level > 20)
-            levelupdescription=world->getFallback()->getFallbackString("Level_Up_Default");
-        else
-            levelupdescription=world->getFallback()->getFallbackString("Level_Up_Level"+MyGUI::utility::toString(level));
+        levelupdescription = Fallback::Map::getString("Level_Up_Level"+MyGUI::utility::toString(level));
+
+        if (levelupdescription == "")
+            levelupdescription = Fallback::Map::getString("Level_Up_Default");
 
         mLevelDescription->setCaption (levelupdescription);
 

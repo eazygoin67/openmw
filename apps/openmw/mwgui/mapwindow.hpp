@@ -2,8 +2,7 @@
 #define MWGUI_MAPWINDOW_H
 
 #include <stdint.h>
-
-#include <boost/shared_ptr.hpp>
+#include <memory>
 
 #include "windowpinnablebase.hpp"
 
@@ -31,6 +30,11 @@ namespace MWWorld
 namespace Loading
 {
     class Listener;
+}
+
+namespace SceneUtil
+{
+    class WorkQueue;
 }
 
 namespace MWGui
@@ -122,12 +126,17 @@ namespace MWGui
         // Stores markers that were placed by a player. May be shared between multiple map views.
         CustomMarkerCollection& mCustomMarkers;
 
-        std::vector<MyGUI::ImageBox*> mMapWidgets;
-        std::vector<MyGUI::ImageBox*> mFogWidgets;
+        struct MapEntry
+        {
+            MapEntry(MyGUI::ImageBox* mapWidget, MyGUI::ImageBox* fogWidget)
+                : mMapWidget(mapWidget), mFogWidget(fogWidget) {}
 
-        typedef std::vector<boost::shared_ptr<MyGUI::ITexture> > TextureVector;
-        TextureVector mMapTextures;
-        TextureVector mFogTextures;
+            MyGUI::ImageBox* mMapWidget;
+            MyGUI::ImageBox* mFogWidget;
+            std::shared_ptr<MyGUI::ITexture> mMapTexture;
+            std::shared_ptr<MyGUI::ITexture> mFogTexture;
+        };
+        std::vector<MapEntry> mMaps;
 
         // Keep track of created marker widgets, just to easily remove them later.
         std::vector<MyGUI::Widget*> mDoorMarkerWidgets;
@@ -166,8 +175,7 @@ namespace MWGui
     public:
         EditNoteDialog();
 
-        virtual void open();
-        virtual void exit();
+        virtual void onOpen();
 
         void showDeleteButton(bool show);
         bool getDeleteButtonShown();
@@ -193,14 +201,15 @@ namespace MWGui
     class MapWindow : public MWGui::WindowPinnableBase, public LocalMapBase, public NoDrop
     {
     public:
-        MapWindow(CustomMarkerCollection& customMarkers, DragAndDrop* drag, MWRender::LocalMap* localMapRender);
+        MapWindow(CustomMarkerCollection& customMarkers, DragAndDrop* drag, MWRender::LocalMap* localMapRender, SceneUtil::WorkQueue* workQueue);
         virtual ~MapWindow();
 
         void setCellName(const std::string& cellName);
 
         virtual void setAlpha(float alpha);
+        void setVisible(bool visible);
 
-        void renderGlobalMap(Loading::Listener* loadingListener);
+        void renderGlobalMap();
 
         /// adds the marker to the global map
         /// @param name The ESM::Cell::mName
@@ -212,7 +221,9 @@ namespace MWGui
         void setGlobalMapPlayerPosition (float worldX, float worldY);
         void setGlobalMapPlayerDir(const float x, const float y);
 
-        virtual void open();
+        void ensureGlobalMapLoaded();
+
+        virtual void onOpen();
 
         void onFrame(float dt);
 
@@ -239,8 +250,8 @@ namespace MWGui
         void setGlobalMapMarkerTooltip(MyGUI::Widget* widget, int x, int y);
 
         MyGUI::ScrollView* mGlobalMap;
-        std::auto_ptr<MyGUI::ITexture> mGlobalMapTexture;
-        std::auto_ptr<MyGUI::ITexture> mGlobalMapOverlayTexture;
+        std::unique_ptr<MyGUI::ITexture> mGlobalMapTexture;
+        std::unique_ptr<MyGUI::ITexture> mGlobalMapOverlayTexture;
         MyGUI::ImageBox* mGlobalMapImage;
         MyGUI::ImageBox* mGlobalMapOverlay;
         MyGUI::ImageBox* mPlayerArrowLocal;
@@ -254,10 +265,6 @@ namespace MWGui
         // Markers on global map
         typedef std::pair<int, int> CellId;
         std::set<CellId> mMarkers;
-
-        // Cells that should be explored in the next frame (i.e. their map revealed on the global map)
-        // We can't do this immediately, because the map update is not immediate either (see mNeedMapUpdate in scene.cpp)
-        std::vector<CellId> mQueuedToExplore;
 
         MyGUI::Button* mEventBoxGlobal;
         MyGUI::Button* mEventBoxLocal;

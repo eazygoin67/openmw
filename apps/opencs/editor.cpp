@@ -5,11 +5,9 @@
 #include <QLocalSocket>
 #include <QMessageBox>
 
-#include <components/vfs/manager.hpp>
-#include <components/vfs/registerarchives.hpp>
-
+#include <components/debug/debuglog.hpp>
 #include <components/fallback/validate.hpp>
-
+#include <components/misc/rng.hpp>
 #include <components/nifosg/nifloader.hpp>
 
 #include "model/doc/document.hpp"
@@ -21,23 +19,20 @@
 
 using namespace Fallback;
 
-CS::Editor::Editor ()
+CS::Editor::Editor (int argc, char **argv)
 : mSettingsState (mCfgMgr), mDocumentManager (mCfgMgr),
-  mViewManager (mDocumentManager), mPid(""),
-  mLock(), mMerge (mDocumentManager),
-  mIpcServerName ("org.openmw.OpenCS"), mServer(NULL), mClientSocket(NULL)
+  mPid(""), mLock(), mMerge (mDocumentManager),
+  mIpcServerName ("org.openmw.OpenCS"), mServer(nullptr), mClientSocket(nullptr)
 {
     std::pair<Files::PathContainer, std::vector<std::string> > config = readConfig();
+
+    mViewManager = new CSVDoc::ViewManager(mDocumentManager);
 
     setupDataFiles (config.first);
 
     NifOsg::Loader::setShowMarkers(true);
 
-    mVFS.reset(new VFS::Manager(mFsStrict));
-
-    VFS::registerArchives(mVFS.get(), Files::Collections(config.first, !mFsStrict), config.second, true);
-
-    mDocumentManager.setVFS(mVFS.get());
+    mDocumentManager.setFileData(mFsStrict, config.first, config.second);
 
     mNewGame.setLocalData (mLocal);
     mFileDialog.setLocalData (mLocal);
@@ -50,11 +45,11 @@ CS::Editor::Editor ()
     connect (&mDocumentManager, SIGNAL (lastDocumentDeleted()),
         this, SLOT (lastDocumentDeleted()));
 
-    connect (&mViewManager, SIGNAL (newGameRequest ()), this, SLOT (createGame ()));
-    connect (&mViewManager, SIGNAL (newAddonRequest ()), this, SLOT (createAddon ()));
-    connect (&mViewManager, SIGNAL (loadDocumentRequest ()), this, SLOT (loadDocument ()));
-    connect (&mViewManager, SIGNAL (editSettingsRequest()), this, SLOT (showSettings ()));
-    connect (&mViewManager, SIGNAL (mergeDocument (CSMDoc::Document *)), this, SLOT (mergeDocument (CSMDoc::Document *)));
+    connect (mViewManager, SIGNAL (newGameRequest ()), this, SLOT (createGame ()));
+    connect (mViewManager, SIGNAL (newAddonRequest ()), this, SLOT (createAddon ()));
+    connect (mViewManager, SIGNAL (loadDocumentRequest ()), this, SLOT (loadDocument ()));
+    connect (mViewManager, SIGNAL (editSettingsRequest()), this, SLOT (showSettings ()));
+    connect (mViewManager, SIGNAL (mergeDocument (CSMDoc::Document *)), this, SLOT (mergeDocument (CSMDoc::Document *)));
 
     connect (&mStartup, SIGNAL (createGame()), this, SLOT (createGame ()));
     connect (&mStartup, SIGNAL (createAddon()), this, SLOT (createAddon ()));
@@ -75,6 +70,8 @@ CS::Editor::Editor ()
 
 CS::Editor::~Editor ()
 {
+    delete mViewManager;
+
     mPidFile.close();
 
     if(mServer && boost::filesystem::exists(mPid))
@@ -97,44 +94,49 @@ std::pair<Files::PathContainer, std::vector<std::string> > CS::Editor::readConfi
     boost::program_options::options_description desc("Syntax: openmw-cs <options>\nAllowed options");
 
     desc.add_options()
-    ("data", boost::program_options::value<Files::PathContainer>()->default_value(Files::PathContainer(), "data")->multitoken()->composing())
-    ("data-local", boost::program_options::value<std::string>()->default_value(""))
+    ("data", boost::program_options::value<Files::EscapePathContainer>()->default_value(Files::EscapePathContainer(), "data")->multitoken()->composing())
+    ("data-local", boost::program_options::value<Files::EscapeHashString>()->default_value(""))
     ("fs-strict", boost::program_options::value<bool>()->implicit_value(true)->default_value(false))
-    ("encoding", boost::program_options::value<std::string>()->default_value("win1252"))
-    ("resources", boost::program_options::value<std::string>()->default_value("resources"))
-    ("fallback-archive", boost::program_options::value<std::vector<std::string> >()->
-        default_value(std::vector<std::string>(), "fallback-archive")->multitoken())
+    ("encoding", boost::program_options::value<Files::EscapeHashString>()->default_value("win1252"))
+    ("resources", boost::program_options::value<Files::EscapeHashString>()->default_value("resources"))
+    ("fallback-archive", boost::program_options::value<Files::EscapeStringVector>()->
+        default_value(Files::EscapeStringVector(), "fallback-archive")->multitoken())
     ("fallback", boost::program_options::value<FallbackMap>()->default_value(FallbackMap(), "")
         ->multitoken()->composing(), "fallback values")
-    ("script-blacklist", boost::program_options::value<std::vector<std::string> >()->default_value(std::vector<std::string>(), "")
+    ("script-blacklist", boost::program_options::value<Files::EscapeStringVector>()->default_value(Files::EscapeStringVector(), "")
         ->multitoken(), "exclude specified script from the verifier (if the use of the blacklist is enabled)")
     ("script-blacklist-use", boost::program_options::value<bool>()->implicit_value(true)
         ->default_value(true), "enable script blacklisting");
 
     boost::program_options::notify(variables);
 
-    mCfgMgr.readConfiguration(variables, desc, quiet);
+    mCfgMgr.readConfiguration(variables, desc, false);
 
-    mDocumentManager.setEncoding (
-        ToUTF8::calculateEncoding (variables["encoding"].as<std::string>()));
+    Fallback::Map::init(variables["fallback"].as<FallbackMap>().mMap);
 
-    mDocumentManager.setResourceDir (mResources = variables["resources"].as<std::string>());
+    const std::string encoding = variables["encoding"].as<Files::EscapeHashString>().toStdString();
+    mDocumentManager.setEncoding (ToUTF8::calculateEncoding (encoding));
+    mFileDialog.setEncoding (QString::fromUtf8(encoding.c_str()));
 
-    mDocumentManager.setFallbackMap (variables["fallback"].as<FallbackMap>().mMap);
+    mDocumentManager.setResourceDir (mResources = variables["resources"].as<Files::EscapeHashString>().toStdString());
 
     if (variables["script-blacklist-use"].as<bool>())
         mDocumentManager.setBlacklistedScripts (
-            variables["script-blacklist"].as<std::vector<std::string> >());
+            variables["script-blacklist"].as<Files::EscapeStringVector>().toStdStringVector());
 
     mFsStrict = variables["fs-strict"].as<bool>();
 
     Files::PathContainer dataDirs, dataLocal;
     if (!variables["data"].empty()) {
-        dataDirs = Files::PathContainer(variables["data"].as<Files::PathContainer>());
+        dataDirs = Files::PathContainer(Files::EscapePath::toPathContainer(variables["data"].as<Files::EscapePathContainer>()));
     }
 
-    std::string local = variables["data-local"].as<std::string>();
-    if (!local.empty()) {
+    std::string local = variables["data-local"].as<Files::EscapeHashString>().toStdString();
+    if (!local.empty())
+    {
+        if (local.front() == '\"')
+            local = local.substr(1, local.length() - 2);
+
         dataLocal.push_back(Files::PathContainer::value_type(local));
     }
 
@@ -164,7 +166,7 @@ std::pair<Files::PathContainer, std::vector<std::string> > CS::Editor::readConfi
         mFileDialog.addFiles(path);
     }
 
-    return std::make_pair (dataDirs, variables["fallback-archive"].as<std::vector<std::string> >());
+    return std::make_pair (dataDirs, variables["fallback-archive"].as<Files::EscapeStringVector>().toStdStringVector());
 }
 
 void CS::Editor::createGame()
@@ -297,7 +299,7 @@ bool CS::Editor::makeIPCServer()
         mLock = boost::interprocess::file_lock(mPid.string().c_str());
         if(!mLock.try_lock())
         {
-            std::cerr << "OpenCS already running."  << std::endl;
+            Log(Debug::Error) << "Error: OpenMW-CS is already running.";
             return false;
         }
 
@@ -320,17 +322,17 @@ bool CS::Editor::makeIPCServer()
             if(boost::filesystem::exists(fullPath.toUtf8().constData()))
             {
                 // TODO: compare pid of the current process with that in the file
-                std::cout << "Detected unclean shutdown." << std::endl;
+                Log(Debug::Info) << "Detected unclean shutdown.";
                 // delete the stale file
                 if(remove(fullPath.toUtf8().constData()))
-                    std::cerr << "ERROR removing stale connection file" << std::endl;
+                    Log(Debug::Error) << "Error: can not remove stale connection file.";
             }
         }
     }
 
     catch(const std::exception& e)
     {
-        std::cerr << "ERROR " << e.what() << std::endl;
+        Log(Debug::Error) << "Error: " << e.what();
         return false;
     }
 
@@ -341,7 +343,7 @@ bool CS::Editor::makeIPCServer()
     }
 
     mServer->close();
-    mServer = NULL;
+    mServer = nullptr;
     return false;
 }
 
@@ -357,6 +359,8 @@ int CS::Editor::run()
     if (mLocal.empty())
         return 1;
 
+    Misc::Rng::init();
+
     mStartup.show();
 
     QApplication::setQuitOnLastWindowClosed (true);
@@ -366,7 +370,7 @@ int CS::Editor::run()
 
 void CS::Editor::documentAdded (CSMDoc::Document *document)
 {
-    mViewManager.addView (document);
+    mViewManager->addView (document);
 }
 
 void CS::Editor::documentAboutToBeRemoved (CSMDoc::Document *document)

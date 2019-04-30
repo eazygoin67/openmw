@@ -8,22 +8,25 @@
 #include <QStackedWidget>
 #include <QListWidgetItem>
 
+#include <components/debug/debuglog.hpp>
+
 #include "../../model/prefs/state.hpp"
 
 #include "page.hpp"
 #include "keybindingpage.hpp"
+#include "contextmenulist.hpp"
 
 void CSVPrefs::Dialogue::buildCategorySelector (QSplitter *main)
 {
-    mList = new QListWidget (main);
-    mList->setMinimumWidth (50);
-    mList->setSizePolicy (QSizePolicy::Expanding, QSizePolicy::Expanding);
+    CSVPrefs::ContextMenuList* list = new CSVPrefs::ContextMenuList (main);
+    list->setMinimumWidth (50);
+    list->setSizePolicy (QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    mList->setSelectionBehavior (QAbstractItemView::SelectItems);
+    list->setSelectionBehavior (QAbstractItemView::SelectItems);
 
-    main->addWidget (mList);
+    main->addWidget (list);
 
-    QFontMetrics metrics (QApplication::font());
+    QFontMetrics metrics (QApplication::font(list));
 
     int maxWidth = 1;
 
@@ -33,12 +36,12 @@ void CSVPrefs::Dialogue::buildCategorySelector (QSplitter *main)
         QString label = QString::fromUtf8 (iter->second.getKey().c_str());
         maxWidth = std::max (maxWidth, metrics.width (label));
 
-        mList->addItem (label);
+        list->addItem (label);
     }
 
-    mList->setMaximumWidth (maxWidth + 10);
+    list->setMaximumWidth (maxWidth + 10);
 
-    connect (mList, SIGNAL (currentItemChanged (QListWidgetItem *, QListWidgetItem *)),
+    connect (list, SIGNAL (currentItemChanged (QListWidgetItem *, QListWidgetItem *)),
         this, SLOT (selectionChanged (QListWidgetItem *, QListWidgetItem *)));
 }
 
@@ -76,14 +79,20 @@ CSVPrefs::Dialogue::Dialogue()
 
 CSVPrefs::Dialogue::~Dialogue()
 {
-    if (isVisible())
-        CSMPrefs::State::get().save();
+    try
+    {
+        if (isVisible())
+            CSMPrefs::State::get().save();
+    }
+    catch(const std::exception& e)
+    {
+        Log(Debug::Error) << "Error in the destructor: " << e.what();
+    }
 }
 
 void CSVPrefs::Dialogue::closeEvent (QCloseEvent *event)
 {
     QMainWindow::closeEvent (event);
-
     CSMPrefs::State::get().save();
 }
 

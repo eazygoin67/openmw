@@ -7,11 +7,11 @@
 
 namespace Compiler
 {
-    /// \brief Error handler implementation: Write errors into stream
+    /// \brief Error handler implementation: Write errors into logging stream
 
     class StreamErrorHandler : public ErrorHandler
     {
-            std::ostream& mStream;
+            std::string mContext;
 
         // not implemented
 
@@ -26,9 +26,11 @@ namespace Compiler
 
         public:
 
+            void setContext(const std::string& context);
+
         // constructors
 
-            StreamErrorHandler (std::ostream& ErrorStream);
+            StreamErrorHandler ();
             ///< constructor
     };
 }

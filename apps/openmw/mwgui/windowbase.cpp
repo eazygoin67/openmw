@@ -3,10 +3,10 @@
 #include <MyGUI_InputManager.h>
 #include <MyGUI_RenderManager.h>
 
-#include <components/settings/settings.hpp>
-
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/environment.hpp"
+
+#include <components/widgets/imagebutton.hpp>
 
 #include "draganddrop.hpp"
 
@@ -15,6 +15,7 @@ using namespace MWGui;
 WindowBase::WindowBase(const std::string& parLayout)
   : Layout(parLayout)
 {
+    mMainWidget->setVisible(false);
 }
 
 void WindowBase::setVisible(bool visible)
@@ -23,20 +24,20 @@ void WindowBase::setVisible(bool visible)
     mMainWidget->setVisible(visible);
 
     if (visible)
-        open();
-    else if (wasVisible && !visible)
-        close();
+        onOpen();
+    else if (wasVisible)
+        onClose();
 
     // This is needed as invisible widgets can retain key focus.
     // Remove for MyGUI 3.2.2
     if (!visible)
     {
         MyGUI::Widget* keyFocus = MyGUI::InputManager::getInstance().getKeyFocusWidget();
-        while (keyFocus != mMainWidget && keyFocus != NULL)
+        while (keyFocus != mMainWidget && keyFocus != nullptr)
             keyFocus = keyFocus->getParent();
 
         if (keyFocus == mMainWidget)
-            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(NULL);
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
     }
 }
 
@@ -64,16 +65,20 @@ WindowModal::WindowModal(const std::string& parLayout)
 {
 }
 
-void WindowModal::open()
+void WindowModal::onOpen()
 {
-    MyGUI::InputManager::getInstance ().addWidgetModal (mMainWidget);
     MWBase::Environment::get().getWindowManager()->addCurrentModal(this); //Set so we can escape it if needed
+
+    MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget();
+    MyGUI::InputManager::getInstance ().addWidgetModal (mMainWidget);
+    MyGUI::InputManager::getInstance().setKeyFocusWidget(focus);
 }
 
-void WindowModal::close()
+void WindowModal::onClose()
 {
-    MyGUI::InputManager::getInstance ().removeWidgetModal (mMainWidget);
     MWBase::Environment::get().getWindowManager()->removeCurrentModal(this);
+
+    MyGUI::InputManager::getInstance ().removeWidgetModal (mMainWidget);
 }
 
 NoDrop::NoDrop(DragAndDrop *drag, MyGUI::Widget *widget)
@@ -116,4 +121,31 @@ void NoDrop::setAlpha(float alpha)
 {
     if (mWidget)
         mWidget->setAlpha(alpha);
+}
+
+BookWindowBase::BookWindowBase(const std::string& parLayout)
+  : WindowBase(parLayout)
+{
+}
+
+float BookWindowBase::adjustButton (char const * name)
+{
+    Gui::ImageButton* button;
+    WindowBase::getWidget (button, name);
+    MyGUI::IntSize requested = button->getRequestedSize();
+    float scale = requested.height / button->getSize().height;
+    MyGUI::IntSize newSize = requested;
+    newSize.width /= scale;
+    newSize.height /= scale;
+    button->setSize(newSize);
+
+    if (button->getAlign().isRight())
+    {
+        MyGUI::IntSize diff = (button->getSize() - requested);
+        diff.width /= scale;
+        diff.height /= scale;
+        button->setPosition(button->getPosition() + MyGUI::IntPoint(diff.width,0));
+    }
+
+    return scale;
 }

@@ -10,8 +10,10 @@
 #include <osgViewer/CompositeViewer>
 #include <osgViewer/ViewerEventHandlers>
 #include <osg/LightModel>
+#include <osg/Material>
 #include <osg/Version>
 
+#include <components/debug/debuglog.hpp>
 #include <components/resource/scenemanager.hpp>
 #include <components/resource/resourcesystem.hpp>
 #include <components/sceneutil/lightmanager.hpp>
@@ -55,6 +57,7 @@ RenderWidget::RenderWidget(QWidget *parent, Qt::WindowFlags f)
     traits->vsync = false;
 
     mView = new osgViewer::View;
+    updateCameraParameters( traits->width / static_cast<double>(traits->height) );
 
     osg::ref_ptr<osgQt::GraphicsWindowQt> window = new osgQt::GraphicsWindowQt(traits.get());
     QLayout* layout = new QHBoxLayout(this);
@@ -65,7 +68,6 @@ RenderWidget::RenderWidget(QWidget *parent, Qt::WindowFlags f)
     mView->getCamera()->setGraphicsContext(window);
     mView->getCamera()->setClearColor( osg::Vec4(0.2, 0.2, 0.6, 1.0) );
     mView->getCamera()->setViewport( new osg::Viewport(0, 0, traits->width, traits->height) );
-    mView->getCamera()->setProjectionMatrixAsPerspective(30.0f, static_cast<double>(traits->width)/static_cast<double>(traits->height), 1.0f, 10000.0f );
 
     SceneUtil::LightManager* lightMgr = new SceneUtil::LightManager;
     lightMgr->setStartLight(1);
@@ -74,6 +76,12 @@ RenderWidget::RenderWidget(QWidget *parent, Qt::WindowFlags f)
 
     mView->getCamera()->getOrCreateStateSet()->setMode(GL_NORMALIZE, osg::StateAttribute::ON);
     mView->getCamera()->getOrCreateStateSet()->setMode(GL_CULL_FACE, osg::StateAttribute::ON);
+    osg::ref_ptr<osg::Material> defaultMat (new osg::Material);
+    defaultMat->setColorMode(osg::Material::OFF);
+    defaultMat->setAmbient(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+    defaultMat->setDiffuse(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+    defaultMat->setSpecular(osg::Material::FRONT_AND_BACK, osg::Vec4f(0.f, 0.f, 0.f, 0.f));
+    mView->getCamera()->getOrCreateStateSet()->setAttribute(defaultMat);
 
     mView->setSceneData(mRootNode);
 
@@ -89,7 +97,14 @@ RenderWidget::RenderWidget(QWidget *parent, Qt::WindowFlags f)
 
 RenderWidget::~RenderWidget()
 {
-    CompositeViewer::get().removeView(mView);
+    try
+    {
+        CompositeViewer::get().removeView(mView);
+    }
+    catch(const std::exception& e)
+    {
+        Log(Debug::Error) << "Error in the destructor: " << e.what();
+    }
 }
 
 void RenderWidget::flagAsModified()
@@ -144,6 +159,9 @@ CompositeViewer::CompositeViewer()
 
     connect( &mTimer, SIGNAL(timeout()), this, SLOT(update()) );
     mTimer.start( 10 );
+
+    int frameRateLimit = CSMPrefs::get()["Rendering"]["framerate-limit"].toInt();
+    setRunMaxFrameRate(frameRateLimit);
 }
 
 CompositeViewer &CompositeViewer::get()
@@ -161,16 +179,23 @@ void CompositeViewer::update()
 
     mSimulationTime += dt;
     frame(mSimulationTime);
+
+    double minFrameTime = _runMaxFrameRate > 0.0 ? 1.0 / _runMaxFrameRate : 0.0;
+    if (dt < minFrameTime)
+    {
+        OpenThreads::Thread::microSleep(1000*1000*(minFrameTime-dt));
+    }
 }
 
 // ---------------------------------------------------
 
-SceneWidget::SceneWidget(boost::shared_ptr<Resource::ResourceSystem> resourceSystem, QWidget *parent, Qt::WindowFlags f,
+SceneWidget::SceneWidget(std::shared_ptr<Resource::ResourceSystem> resourceSystem, QWidget *parent, Qt::WindowFlags f,
     bool retrieveInput)
     : RenderWidget(parent, f)
     , mResourceSystem(resourceSystem)
-    , mLighting(NULL)
+    , mLighting(nullptr)
     , mHasDefaultAmbient(false)
+    , mIsExterior(true)
     , mPrevMouseX(0)
     , mPrevMouseY(0)
     , mCamPositionSet(false)
@@ -180,6 +205,8 @@ SceneWidget::SceneWidget(boost::shared_ptr<Resource::ResourceSystem> resourceSys
     mCurrentCamControl = mFreeCamControl;
 
     mOrbitCamControl->setPickingMask(Mask_Reference | Mask_Terrain);
+
+    mOrbitCamControl->setConstRoll( CSMPrefs::get()["3D Scene Input"]["navi-orbit-const-roll"].isTrue() );
 
     // we handle lighting manually
     mView->setLightingMode(osgViewer::View::NO_LIGHT);
@@ -214,8 +241,8 @@ SceneWidget::SceneWidget(boost::shared_ptr<Resource::ResourceSystem> resourceSys
 
 SceneWidget::~SceneWidget()
 {
-    // Since we're holding on to the scene templates past the existence of this graphics context, we'll need to manually release the created objects
-    mResourceSystem->getSceneManager()->releaseGLObjects(mView->getCamera()->getGraphicsContext()->getState());
+    // Since we're holding on to the resources past the existence of this graphics context, we'll need to manually release the created objects
+    mResourceSystem->releaseGLObjects(mView->getCamera()->getGraphicsContext()->getState());
 }
 
 void SceneWidget::setLighting(Lighting *lighting)
@@ -224,7 +251,7 @@ void SceneWidget::setLighting(Lighting *lighting)
         mLighting->deactivate();
 
     mLighting = lighting;
-    mLighting->activate (mRootNode);
+    mLighting->activate (mRootNode, mIsExterior);
 
     osg::Vec4f ambient = mLighting->getAmbientColour(mHasDefaultAmbient ? &mDefaultAmbient : 0);
     setAmbient(ambient);
@@ -287,6 +314,11 @@ void SceneWidget::setDefaultAmbient (const osg::Vec4f& colour)
     mHasDefaultAmbient = true;
 
     setAmbient(mLighting->getAmbientColour(&mDefaultAmbient));
+}
+
+void SceneWidget::setExterior (bool isExterior)
+{
+    mIsExterior = isExterior;
 }
 
 void SceneWidget::mouseMoveEvent (QMouseEvent *event)
@@ -363,29 +395,68 @@ void SceneWidget::settingChanged (const CSMPrefs::Setting *setting)
     {
         mOrbitCamControl->setOrbitSpeedMultiplier(setting->toDouble());
     }
+    else if (*setting=="3D Scene Input/navi-orbit-const-roll")
+    {
+        mOrbitCamControl->setConstRoll(setting->isTrue());
+    }
+    else if (*setting=="Rendering/framerate-limit")
+    {
+        CompositeViewer::get().setRunMaxFrameRate(setting->toInt());
+    }
+    else if (*setting=="Rendering/camera-fov" ||
+             *setting=="Rendering/camera-ortho" ||
+             *setting=="Rendering/camera-ortho-size")
+    {
+        updateCameraParameters();
+    }
+}
+
+void RenderWidget::updateCameraParameters(double overrideAspect)
+{
+    const float nearDist = 1.0;
+    const float farDist = 1000.0;
+
+    if (CSMPrefs::get()["Rendering"]["camera-ortho"].isTrue())
+    {
+        const float size = CSMPrefs::get()["Rendering"]["camera-ortho-size"].toInt();
+        const float aspect = overrideAspect >= 0.0 ? overrideAspect : (width() / static_cast<double>(height()));
+        const float halfH = size * 10.0;
+        const float halfW = halfH * aspect;
+
+        mView->getCamera()->setProjectionMatrixAsOrtho(
+            -halfW, halfW, -halfH, halfH, nearDist, farDist);
+    }
+    else
+    { 
+        mView->getCamera()->setProjectionMatrixAsPerspective(
+            CSMPrefs::get()["Rendering"]["camera-fov"].toInt(),
+            static_cast<double>(width())/static_cast<double>(height()),
+            nearDist, farDist);
+    }
 }
 
 void SceneWidget::selectNavigationMode (const std::string& mode)
 {
     if (mode=="1st")
     {
-        mCurrentCamControl->setCamera(NULL);
+        mCurrentCamControl->setCamera(nullptr);
         mCurrentCamControl = mFreeCamControl;
         mFreeCamControl->setCamera(getCamera());
         mFreeCamControl->fixUpAxis(CameraController::WorldUp);
     }
     else if (mode=="free")
     {
-        mCurrentCamControl->setCamera(NULL);
+        mCurrentCamControl->setCamera(nullptr);
         mCurrentCamControl = mFreeCamControl;
         mFreeCamControl->setCamera(getCamera());
         mFreeCamControl->unfixUpAxis();
     }
     else if (mode=="orbit")
     {
-        mCurrentCamControl->setCamera(NULL);
+        mCurrentCamControl->setCamera(nullptr);
         mCurrentCamControl = mOrbitCamControl;
         mOrbitCamControl->setCamera(getCamera());
+        mOrbitCamControl->reset();
     }
 }
 

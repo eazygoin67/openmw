@@ -10,6 +10,8 @@ namespace MWClass
 
             virtual MWWorld::Ptr copyToCellImpl(const MWWorld::ConstPtr &ptr, MWWorld::CellStore &cell) const;
 
+            static int getSndGenTypeFromName(const std::string &name);
+
         public:
 
             virtual void insertObjectRendering (const MWWorld::Ptr& ptr, const std::string& model, MWRender::RenderingInterface& renderingInterface) const;
@@ -33,12 +35,19 @@ namespace MWClass
             virtual std::string getScript (const MWWorld::ConstPtr& ptr) const;
             ///< Return name of the script attached to ptr
 
-            virtual boost::shared_ptr<MWWorld::Action> activate (const MWWorld::Ptr& ptr, const MWWorld::Ptr& actor) const;
+            virtual std::shared_ptr<MWWorld::Action> activate (const MWWorld::Ptr& ptr, const MWWorld::Ptr& actor) const;
             ///< Generate action for activation
 
             static void registerSelf();
 
             virtual std::string getModel(const MWWorld::ConstPtr &ptr) const;
+
+            virtual bool useAnim() const;
+            ///< Whether or not to use animated variant of model (default false)
+
+            virtual bool isActivator() const;
+
+            virtual std::string getSoundIdFromSndGen(const MWWorld::Ptr &ptr, const std::string &name) const;
     };
 }
 

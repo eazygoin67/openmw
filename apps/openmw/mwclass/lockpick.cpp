@@ -3,11 +3,10 @@
 #include <components/esm/loadlock.hpp>
 
 #include "../mwbase/environment.hpp"
-#include "../mwbase/world.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwworld/ptr.hpp"
-#include "../mwworld/actiontake.hpp"
 #include "../mwworld/actionequip.hpp"
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/cellstore.hpp"
@@ -52,7 +51,7 @@ namespace MWClass
         return ref->mBase->mName;
     }
 
-    boost::shared_ptr<MWWorld::Action> Lockpick::activate (const MWWorld::Ptr& ptr,
+    std::shared_ptr<MWWorld::Action> Lockpick::activate (const MWWorld::Ptr& ptr,
         const MWWorld::Ptr& actor) const
     {
         return defaultItemActivate(ptr, actor);
@@ -83,7 +82,7 @@ namespace MWClass
 
     void Lockpick::registerSelf()
     {
-        boost::shared_ptr<Class> instance (new Lockpick);
+        std::shared_ptr<Class> instance (new Lockpick);
 
         registerClass (typeid (ESM::Lockpick).name(), instance);
     }
@@ -139,9 +138,9 @@ namespace MWClass
         return info;
     }
 
-    boost::shared_ptr<MWWorld::Action> Lockpick::use (const MWWorld::Ptr& ptr) const
+    std::shared_ptr<MWWorld::Action> Lockpick::use (const MWWorld::Ptr& ptr, bool force) const
     {
-        boost::shared_ptr<MWWorld::Action> action(new MWWorld::ActionEquip(ptr));
+        std::shared_ptr<MWWorld::Action> action(new MWWorld::ActionEquip(ptr, force));
 
         action->setSound(getUpSoundId(ptr));
 
@@ -153,6 +152,16 @@ namespace MWClass
         const MWWorld::LiveCellRef<ESM::Lockpick> *ref = ptr.get<ESM::Lockpick>();
 
         return MWWorld::Ptr(cell.insert(ref), &cell);
+    }
+
+    std::pair<int, std::string> Lockpick::canBeEquipped(const MWWorld::ConstPtr &ptr, const MWWorld::Ptr &npc) const
+    {
+        // Do not allow equip tools from inventory during attack
+        if (MWBase::Environment::get().getMechanicsManager()->isAttackingOrSpell(npc)
+            && MWBase::Environment::get().getWindowManager()->isGuiMode())
+            return std::make_pair(0, "#{sCantEquipWeapWarning}");
+
+        return std::make_pair(1, "");
     }
 
     bool Lockpick::canSell (const MWWorld::ConstPtr& item, int npcServices) const

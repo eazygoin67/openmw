@@ -1,7 +1,8 @@
 #ifndef OPENMW_GUI_SPELLVIEW_H
 #define OPENMW_GUI_SPELLVIEW_H
 
-#include <boost/tuple/tuple.hpp>
+#include <memory>
+#include <tuple>
 
 #include <MyGUI_Widget.h>
 
@@ -56,7 +57,7 @@ namespace MWGui
     private:
         MyGUI::ScrollView* mScrollView;
 
-        std::auto_ptr<SpellModel> mModel;
+        std::unique_ptr<SpellModel> mModel;
 
         /// tracks a row in the spell view
         struct LineInfo

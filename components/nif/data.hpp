@@ -2,7 +2,7 @@
   OpenMW - The completely unofficial reimplementation of Morrowind
   Copyright (C) 2008-2010  Nicolay Korslund
   Email: < korslund@gmail.com >
-  WWW: http://openmw.sourceforge.net/
+  WWW: https://openmw.org/
 
   This file (data.h) is part of the OpenMW package.
 
@@ -17,7 +17,7 @@
 
   You should have received a copy of the GNU General Public License
   version 3 along with this program. If not, see
-  http://www.gnu.org/licenses/ .
+  https://www.gnu.org/licenses/ .
 
  */
 
@@ -28,8 +28,6 @@
 
 #include "niftypes.hpp" // Transformation
 
-#include <osg/Array>
-
 namespace Nif
 {
 
@@ -37,10 +35,9 @@ namespace Nif
 class ShapeData : public Record
 {
 public:
-    osg::ref_ptr<osg::Vec3Array> vertices, normals;
-    osg::ref_ptr<osg::Vec4Array> colors;
-
-    std::vector< osg::ref_ptr<osg::Vec2Array> > uvlist;
+    std::vector<osg::Vec3f> vertices, normals;
+    std::vector<osg::Vec4f> colors;
+    std::vector< std::vector<osg::Vec2f> > uvlist;
     osg::Vec3f center;
     float radius;
 
@@ -51,7 +48,7 @@ class NiTriShapeData : public ShapeData
 {
 public:
     // Triangles, three vertex indices per triangle
-    osg::ref_ptr<osg::DrawElementsUShort> triangles;
+    std::vector<unsigned short> triangles;
 
     void read(NIFStream *nif);
 };
@@ -118,7 +115,7 @@ public:
     Format fmt;
 
     unsigned int rmask, gmask, bmask, amask;
-    int bpp, mips;
+    int bpp, numberOfMipmaps;
 
     struct Mipmap
     {
@@ -190,7 +187,7 @@ struct NiMorphData : public Record
 {
     struct MorphData {
         FloatKeyMapPtr mKeyFrames;
-        osg::ref_ptr<osg::Vec3Array> mVertices;
+        std::vector<osg::Vec3f> mVertices;
     };
     std::vector<MorphData> mMorphs;
 

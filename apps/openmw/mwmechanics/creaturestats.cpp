@@ -7,6 +7,7 @@
 #include <components/esm/esmwriter.hpp>
 
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/player.hpp"
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
@@ -21,7 +22,7 @@ namespace MWMechanics
           mTalkedTo (false), mAlarmed (false), mAttacked (false),
           mKnockdown(false), mKnockdownOneFrame(false), mKnockdownOverOneFrame(false),
           mHitRecovery(false), mBlock(false), mMovementFlags(0),
-          mFallHeight(0), mRecalcMagicka(false), mLastRestock(0,0), mGoldPool(0), mActorId(-1),
+          mFallHeight(0), mRecalcMagicka(false), mLastRestock(0,0), mGoldPool(0), mActorId(-1), mHitAttemptActorId(-1),
           mDeathAnimation(-1), mTimeOfDeath(), mLevel (0)
     {
         for (int i=0; i<4; ++i)
@@ -48,8 +49,8 @@ namespace MWMechanics
         const MWWorld::Store<ESM::GameSetting> &gmst =
             MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
 
-        static const float fFatigueBase = gmst.find("fFatigueBase")->getFloat();
-        static const float fFatigueMult = gmst.find("fFatigueMult")->getFloat();
+        static const float fFatigueBase = gmst.find("fFatigueBase")->mValue.getFloat();
+        static const float fFatigueMult = gmst.find("fFatigueMult")->mValue.getFloat();
 
         return fFatigueBase - fFatigueMult * (1-normalised);
     }
@@ -157,7 +158,7 @@ namespace MWMechanics
                 int endurance    = getAttribute(ESM::Attribute::Endurance).getModified();
                 DynamicStat<float> fatigue = getFatigue();
                 float diff = (strength+willpower+agility+endurance) - fatigue.getBase();
-                float currentToBaseRatio = (fatigue.getCurrent() / fatigue.getBase());
+                float currentToBaseRatio = fatigue.getBase() > 0 ? (fatigue.getCurrent() / fatigue.getBase()) : 0;
                 fatigue.setModified(fatigue.getModified() + diff, 0);
                 fatigue.setCurrent(fatigue.getBase() * currentToBaseRatio);
                 setFatigue(fatigue);
@@ -195,6 +196,7 @@ namespace MWMechanics
             mDead = true;
 
             mDynamic[index].setModifier(0);
+            mDynamic[index].setCurrentModifier(0);
             mDynamic[index].setCurrent(0);
 
             if (MWBase::Environment::get().getWorld()->getGodModeState())
@@ -371,13 +373,26 @@ namespace MWMechanics
         return mLastHitAttemptObject;
     }
 
+    void CreatureStats::setHitAttemptActorId(int actorId)
+    {
+        mHitAttemptActorId = actorId;
+    }
+
+    int CreatureStats::getHitAttemptActorId() const
+    {
+        return mHitAttemptActorId;
+    }
+
     void CreatureStats::addToFallHeight(float height)
     {
         mFallHeight += height;
     }
 
-    float CreatureStats::land()
+    float CreatureStats::land(bool isPlayer)
     {
+        if (isPlayer)
+            MWBase::Environment::get().getWorld()->getPlayer().setJumping(false);
+
         float height = mFallHeight;
         mFallHeight = 0;
         return height;
@@ -521,6 +536,7 @@ namespace MWMechanics
         state.mActorId = mActorId;
         state.mDeathAnimation = mDeathAnimation;
         state.mTimeOfDeath = mTimeOfDeath.toEsm();
+        //state.mHitAttemptActorId = mHitAttemptActorId;
 
         mSpells.writeState(state.mSpells);
         mActiveSpells.writeState(state.mActiveSpells);
@@ -569,6 +585,7 @@ namespace MWMechanics
         mActorId = state.mActorId;
         mDeathAnimation = state.mDeathAnimation;
         mTimeOfDeath = MWWorld::TimeStamp(state.mTimeOfDeath);
+        //mHitAttemptActorId = state.mHitAttemptActorId;
 
         mSpells.readState(state.mSpells);
         mActiveSpells.readState(state.mActiveSpells);

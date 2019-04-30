@@ -1,6 +1,6 @@
 #include "workqueue.hpp"
 
-#include <iostream>
+#include <components/debug/debuglog.hpp>
 
 namespace SceneUtil
 {
@@ -71,7 +71,7 @@ void WorkQueue::addWorkItem(osg::ref_ptr<WorkItem> item, bool front)
 {
     if (item->isDone())
     {
-        std::cerr << "warning, trying to add a work item that is already completed" << std::endl;
+        Log(Debug::Error) << "Error: trying to add a work item that is already completed";
         return;
     }
 
@@ -97,11 +97,29 @@ osg::ref_ptr<WorkItem> WorkQueue::removeWorkItem()
         return item;
     }
     else
-        return NULL;
+        return nullptr;
+}
+
+unsigned int WorkQueue::getNumItems() const
+{
+    OpenThreads::ScopedLock<OpenThreads::Mutex> lock(mMutex);
+    return mQueue.size();
+}
+
+unsigned int WorkQueue::getNumActiveThreads() const
+{
+    unsigned int count = 0;
+    for (unsigned int i=0; i<mThreads.size(); ++i)
+    {
+        if (mThreads[i]->isActive())
+            ++count;
+    }
+    return count;
 }
 
 WorkThread::WorkThread(WorkQueue *workQueue)
     : mWorkQueue(workQueue)
+    , mActive(false)
 {
 }
 
@@ -112,9 +130,16 @@ void WorkThread::run()
         osg::ref_ptr<WorkItem> item = mWorkQueue->removeWorkItem();
         if (!item)
             return;
+        mActive = true;
         item->doWork();
         item->signalDone();
+        mActive = false;
     }
+}
+
+bool WorkThread::isActive() const
+{
+    return mActive;
 }
 
 }

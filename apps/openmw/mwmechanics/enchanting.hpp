@@ -7,9 +7,6 @@
 
 #include "../mwworld/ptr.hpp"
 
-#include "../mwbase/world.hpp"
-#include "../mwbase/environment.hpp"
-
 namespace MWMechanics
 {
     class Enchanting
@@ -29,14 +26,14 @@ namespace MWMechanics
 
         public:
             Enchanting();
-            void setEnchanter(MWWorld::Ptr enchanter);
+            void setEnchanter(const MWWorld::Ptr& enchanter);
             void setSelfEnchanting(bool selfEnchanting);
-            void setOldItem(MWWorld::Ptr oldItem);
+            void setOldItem(const MWWorld::Ptr& oldItem);
             MWWorld::Ptr getOldItem() { return mOldItemPtr; }
             MWWorld::Ptr getGem() { return mSoulGemPtr; }
             void setNewItemName(const std::string& s);
-            void setEffect(ESM::EffectList effectList);
-            void setSoulGem(MWWorld::Ptr soulGem);
+            void setEffect(const ESM::EffectList& effectList);
+            void setSoulGem(const MWWorld::Ptr& soulGem);
             bool create(); //Return true if created, false if failed.
             void nextCastStyle(); //Set enchant type to next possible type (for mOldItemPtr object)
             int getCastStyle() const;

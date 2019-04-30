@@ -26,8 +26,6 @@ namespace MWGui
     {
         getWidget(mProgressBar, "ProgressBar");
 
-        setVisible(false);
-
         mTimeAdvancer.eventProgressChanged += MyGUI::newDelegate(this, &JailScreen::onJailProgressChanged);
         mTimeAdvancer.eventFinished += MyGUI::newDelegate(this, &JailScreen::onJailFinished);
 
@@ -60,6 +58,7 @@ namespace MWGui
         {
             MWWorld::Ptr player = MWMechanics::getPlayer();
             MWBase::Environment::get().getWorld()->teleportToClosestMarker(player, "prisonmarker");
+            MWBase::Environment::get().getWindowManager()->fadeScreenOut(0.f); // override fade-in caused by cell transition
 
             setVisible(true);
             mTimeAdvancer.run(100);
@@ -79,8 +78,7 @@ namespace MWGui
 
         MWWorld::Ptr player = MWMechanics::getPlayer();
 
-        for (int i=0; i<mDays*24; ++i)
-            MWBase::Environment::get().getMechanicsManager()->rest(true);
+        MWBase::Environment::get().getMechanicsManager()->rest(mDays * 24, true);
         MWBase::Environment::get().getWorld()->advanceTime(mDays * 24);
 
         std::set<int> skills;
@@ -93,35 +91,29 @@ namespace MWGui
             if (skill == ESM::Skill::Security || skill == ESM::Skill::Sneak)
                 value.setBase(std::min(100, value.getBase()+1));
             else
-                value.setBase(value.getBase()-1);
+                value.setBase(std::max(0, value.getBase()-1));
         }
 
         const MWWorld::Store<ESM::GameSetting>& gmst = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
 
         std::string message;
         if (mDays == 1)
-            message = gmst.find("sNotifyMessage42")->getString();
+            message = gmst.find("sNotifyMessage42")->mValue.getString();
         else
-            message = gmst.find("sNotifyMessage43")->getString();
+            message = gmst.find("sNotifyMessage43")->mValue.getString();
 
-        std::stringstream dayStr;
-        dayStr << mDays;
-        if (message.find("%d") != std::string::npos)
-            message.replace(message.find("%d"), 2, dayStr.str());
+        Misc::StringUtils::replace(message, "%d", std::to_string(mDays).c_str(), 2);
 
-        for (std::set<int>::iterator it = skills.begin(); it != skills.end(); ++it)
+        for (const int& skill : skills)
         {
-            std::string skillName = gmst.find(ESM::Skill::sSkillNameIds[*it])->getString();
-            std::stringstream skillValue;
-            skillValue << player.getClass().getNpcStats(player).getSkill(*it).getBase();
-            std::string skillMsg = gmst.find("sNotifyMessage44")->getString();
-            if (*it == ESM::Skill::Sneak || *it == ESM::Skill::Security)
-                skillMsg = gmst.find("sNotifyMessage39")->getString();
+            std::string skillName = gmst.find(ESM::Skill::sSkillNameIds[skill])->mValue.getString();
+            int skillValue = player.getClass().getNpcStats(player).getSkill(skill).getBase();
+            std::string skillMsg = gmst.find("sNotifyMessage44")->mValue.getString();
+            if (skill == ESM::Skill::Sneak || skill == ESM::Skill::Security)
+                skillMsg = gmst.find("sNotifyMessage39")->mValue.getString();
 
-            if (skillMsg.find("%s") != std::string::npos)
-                skillMsg.replace(skillMsg.find("%s"), 2, skillName);
-            if (skillMsg.find("%d") != std::string::npos)
-                skillMsg.replace(skillMsg.find("%d"), 2, skillValue.str());
+            Misc::StringUtils::replace(skillMsg, "%s", skillName.c_str(), 2);
+            Misc::StringUtils::replace(skillMsg, "%d", std::to_string(skillValue).c_str(), 2);
             message += "\n" + skillMsg;
         }
 

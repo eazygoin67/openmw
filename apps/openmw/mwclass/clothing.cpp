@@ -7,7 +7,6 @@
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwworld/ptr.hpp"
-#include "../mwworld/actiontake.hpp"
 #include "../mwworld/actionequip.hpp"
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/cellstore.hpp"
@@ -53,7 +52,7 @@ namespace MWClass
         return ref->mBase->mName;
     }
 
-    boost::shared_ptr<MWWorld::Action> Clothing::activate (const MWWorld::Ptr& ptr,
+    std::shared_ptr<MWWorld::Action> Clothing::activate (const MWWorld::Ptr& ptr,
             const MWWorld::Ptr& actor) const
     {
         return defaultItemActivate(ptr, actor);
@@ -124,7 +123,7 @@ namespace MWClass
 
     void Clothing::registerSelf()
     {
-        boost::shared_ptr<Class> instance (new Clothing);
+        std::shared_ptr<Class> instance (new Clothing);
 
         registerClass (typeid (ESM::Clothing).name(), instance);
     }
@@ -215,7 +214,7 @@ namespace MWClass
     std::pair<int, std::string> Clothing::canBeEquipped(const MWWorld::ConstPtr &ptr, const MWWorld::Ptr &npc) const
     {
         // slots that this item can be equipped in
-        std::pair<std::vector<int>, bool> slots_ = ptr.getClass().getEquipmentSlots(ptr);
+        std::pair<std::vector<int>, bool> slots_ = getEquipmentSlots(ptr);
 
         if (slots_.first.empty())
             return std::make_pair(0, "");
@@ -243,9 +242,9 @@ namespace MWClass
         return std::make_pair (1, "");
     }
 
-    boost::shared_ptr<MWWorld::Action> Clothing::use (const MWWorld::Ptr& ptr) const
+    std::shared_ptr<MWWorld::Action> Clothing::use (const MWWorld::Ptr& ptr, bool force) const
     {
-        boost::shared_ptr<MWWorld::Action> action(new MWWorld::ActionEquip(ptr));
+        std::shared_ptr<MWWorld::Action> action(new MWWorld::ActionEquip(ptr, force));
 
         action->setSound(getUpSoundId(ptr));
 

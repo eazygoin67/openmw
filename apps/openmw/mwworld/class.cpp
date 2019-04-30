@@ -20,11 +20,10 @@
 
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/npcstats.hpp"
-#include "../mwmechanics/magiceffects.hpp"
 
 namespace MWWorld
 {
-    std::map<std::string, boost::shared_ptr<Class> > Class::sClasses;
+    std::map<std::string, std::shared_ptr<Class> > Class::sClasses;
 
     Class::Class() {}
 
@@ -83,6 +82,18 @@ namespace MWWorld
             return ptr.getCellRef().getCharge();
     }
 
+    float Class::getItemNormalizedHealth (const ConstPtr& ptr) const
+    {
+        if (getItemMaxHealth(ptr) == 0)
+        {
+            return 0.f;
+        }
+        else
+        {
+            return getItemHealth(ptr) / static_cast<float>(getItemMaxHealth(ptr));
+        }
+    }
+
     int Class::getItemMaxHealth (const ConstPtr& ptr) const
     {
         throw std::runtime_error ("class does not have item health");
@@ -108,14 +119,14 @@ namespace MWWorld
         throw std::runtime_error("class cannot be hit");
     }
 
-    boost::shared_ptr<Action> Class::activate (const Ptr& ptr, const Ptr& actor) const
+    std::shared_ptr<Action> Class::activate (const Ptr& ptr, const Ptr& actor) const
     {
-        return boost::shared_ptr<Action> (new NullAction);
+        return std::shared_ptr<Action> (new NullAction);
     }
 
-    boost::shared_ptr<Action> Class::use (const Ptr& ptr) const
+    std::shared_ptr<Action> Class::use (const Ptr& ptr, bool force) const
     {
-        return boost::shared_ptr<Action> (new NullAction);
+        return std::shared_ptr<Action> (new NullAction);
     }
 
     ContainerStore& Class::getContainerStore (const Ptr& ptr) const
@@ -233,7 +244,7 @@ namespace MWWorld
         if (key.empty())
             throw std::logic_error ("Class::get(): attempting to get an empty key");
 
-        std::map<std::string, boost::shared_ptr<Class> >::const_iterator iter = sClasses.find (key);
+        std::map<std::string, std::shared_ptr<Class> >::const_iterator iter = sClasses.find (key);
 
         if (iter==sClasses.end())
             throw std::logic_error ("Class::get(): unknown class key: " + key);
@@ -246,7 +257,7 @@ namespace MWWorld
         throw std::runtime_error ("class does not support persistence");
     }
 
-    void Class::registerClass(const std::string& key,  boost::shared_ptr<Class> instance)
+    void Class::registerClass(const std::string& key,  std::shared_ptr<Class> instance)
     {
         instance->mTypeName = key;
         sClasses.insert(std::make_pair(key, instance));
@@ -304,6 +315,11 @@ namespace MWWorld
         return "";
     }
 
+    bool Class::useAnim() const
+    {
+        return false;
+    }
+
     void Class::getModelsToPreload(const Ptr &ptr, std::vector<std::string> &models) const
     {
         std::string model = getModel(ptr);
@@ -325,23 +341,23 @@ namespace MWWorld
     {
     }
 
-    boost::shared_ptr<Action> Class::defaultItemActivate(const Ptr &ptr, const Ptr &actor) const
+    std::shared_ptr<Action> Class::defaultItemActivate(const Ptr &ptr, const Ptr &actor) const
     {
         if(!MWBase::Environment::get().getWindowManager()->isAllowed(MWGui::GW_Inventory))
-            return boost::shared_ptr<Action>(new NullAction());
+            return std::shared_ptr<Action>(new NullAction());
 
         if(actor.getClass().isNpc() && actor.getClass().getNpcStats(actor).isWerewolf())
         {
             const MWWorld::ESMStore &store = MWBase::Environment::get().getWorld()->getStore();
             const ESM::Sound *sound = store.get<ESM::Sound>().searchRandom("WolfItem");
 
-            boost::shared_ptr<MWWorld::Action> action(new MWWorld::FailedAction("#{sWerewolfRefusal}"));
+            std::shared_ptr<MWWorld::Action> action(new MWWorld::FailedAction("#{sWerewolfRefusal}"));
             if(sound) action->setSound(sound->mId);
 
             return action;
         }
 
-        boost::shared_ptr<MWWorld::Action> action(new ActionTake(ptr));
+        std::shared_ptr<MWWorld::Action> action(new ActionTake(ptr));
         action->setSound(getUpSoundId(ptr));
 
         return action;
@@ -391,7 +407,7 @@ namespace MWWorld
         return false;
     }
 
-    bool Class::isPureWaterCreature(const MWWorld::Ptr& ptr) const
+    bool Class::isPureWaterCreature(const ConstPtr& ptr) const
     {
         return canSwim(ptr)
                 && !isBipedal(ptr)
@@ -399,7 +415,7 @@ namespace MWWorld
                 && !canWalk(ptr);
     }
 
-    bool Class::isPureFlyingCreature(const Ptr& ptr) const
+    bool Class::isPureFlyingCreature(const ConstPtr& ptr) const
     {
         return canFly(ptr)
                 && !isBipedal(ptr)
@@ -457,10 +473,15 @@ namespace MWWorld
     float Class::getNormalizedEncumbrance(const Ptr &ptr) const
     {
         float capacity = getCapacity(ptr);
+        float encumbrance = getEncumbrance(ptr);
+
+        if (encumbrance == 0)
+            return 0.f;
+
         if (capacity == 0)
             return 1.f;
 
-        return getEncumbrance(ptr) / capacity;
+        return encumbrance / capacity;
     }
 
     std::string Class::getSound(const MWWorld::ConstPtr&) const
@@ -482,7 +503,7 @@ namespace MWWorld
         return -1;
     }
 
-    int Class::getEffectiveArmorRating(const ConstPtr &armor, const Ptr &actor) const
+    float Class::getEffectiveArmorRating(const ConstPtr &armor, const Ptr &actor) const
     {
         throw std::runtime_error("class does not support armor ratings");
     }

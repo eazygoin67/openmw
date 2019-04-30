@@ -15,8 +15,9 @@ namespace MWGui
     class DragAndDrop;
     class SpellIcons;
     class ItemWidget;
+    class SpellWidget;
 
-    class HUD : public Layout, public LocalMapBase
+    class HUD : public WindowBase, public LocalMapBase
     {
     public:
         HUD(CustomMarkerCollection& customMarkers, DragAndDrop* dragAndDrop, MWRender::LocalMap* localMapRender);
@@ -39,6 +40,7 @@ namespace MWGui
 
         void setSelectedSpell(const std::string& spellId, int successChancePercent);
         void setSelectedEnchantItem(const MWWorld::Ptr& item, int chargePercent);
+        const MWWorld::Ptr& getSelectedEnchantItem();
         void setSelectedWeapon(const MWWorld::Ptr& item, int durabilityPercent);
         void unsetSelectedSpell();
         void unsetSelectedWeapon();
@@ -54,21 +56,21 @@ namespace MWGui
 
         MyGUI::Widget* getEffectBox() { return mEffectBox; }
 
-        void update();
-
         void setEnemy(const MWWorld::Ptr& enemy);
         void resetEnemy();
+
+        void clear();
 
     private:
         MyGUI::ProgressBar *mHealth, *mMagicka, *mStamina, *mEnemyHealth, *mDrowning;
         MyGUI::Widget* mHealthFrame;
         MyGUI::Widget *mWeapBox, *mSpellBox, *mSneakBox;
-        ItemWidget *mWeapImage, *mSpellImage;
+        ItemWidget *mWeapImage;
+        SpellWidget *mSpellImage;
         MyGUI::ProgressBar *mWeapStatus, *mSpellStatus;
         MyGUI::Widget *mEffectBox, *mMinimapBox;
         MyGUI::Button* mMinimapButton;
         MyGUI::ScrollView* mMinimap;
-        MyGUI::ImageBox* mCompass;
         MyGUI::ImageBox* mCrosshair;
         MyGUI::TextBox* mCellNameBox;
         MyGUI::TextBox* mWeaponSpellBox;

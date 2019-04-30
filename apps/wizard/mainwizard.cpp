@@ -3,7 +3,6 @@
 #include <QDebug>
 
 #include <QTime>
-#include <QDateTime>
 #include <QCloseEvent>
 #include <QMessageBox>
 #include <QTextCodec>
@@ -63,10 +62,11 @@ Wizard::MainWizard::MainWizard(QWidget *parent) :
     setupInstallations();
     setupPages();
 
-    const boost::filesystem::path& installedPath = mCfgMgr.getInstallPath();
-    if (!installedPath.empty())
+    const boost::filesystem::path& installationPath = mCfgMgr.getInstallPath();
+    if (!installationPath.empty())
     {
-        addInstallation(toQString(installedPath));
+        const boost::filesystem::path& dataPath = installationPath / "Data Files";
+        addInstallation(toQString(dataPath));
     }
 }
 
@@ -231,34 +231,18 @@ void Wizard::MainWizard::setupInstallations()
 
 void Wizard::MainWizard::runSettingsImporter()
 {
+    writeSettings();
+
     QString path(field(QLatin1String("installation.path")).toString());
 
-    // Create the file if it doesn't already exist, else the importer will fail
     QString userPath(toQString(mCfgMgr.getUserConfigPath()));
     QFile file(userPath + QLatin1String("openmw.cfg"));
-
-    if (!file.exists()) {
-        if (!file.open(QIODevice::ReadWrite)) {
-            // File cannot be created
-            QMessageBox msgBox;
-            msgBox.setWindowTitle(tr("Error writing OpenMW configuration file"));
-            msgBox.setIcon(QMessageBox::Critical);
-            msgBox.setStandardButtons(QMessageBox::Ok);
-            msgBox.setText(tr("<html><head/><body><p><b>Could not open or create %1 for writing</b></p> \
-                              <p>Please make sure you have the right permissions \
-                              and try again.</p></body></html>").arg(file.fileName()));
-            msgBox.exec();
-            return qApp->quit();
-        }
-
-        file.close();
-    }
 
     // Construct the arguments to run the importer
     QStringList arguments;
 
     // Import plugin selection?
-    if (field(QLatin1String("installation.new")).toBool() == true
+    if (field(QLatin1String("installation.retailDisc")).toBool() == true
             || field(QLatin1String("installation.import-addons")).toBool() == true)
         arguments.append(QLatin1String("--game-files"));
 
@@ -278,7 +262,7 @@ void Wizard::MainWizard::runSettingsImporter()
     // Now the paths
     arguments.append(QLatin1String("--ini"));
 
-    if (field(QLatin1String("installation.new")).toBool() == true) {
+    if (field(QLatin1String("installation.retailDisc")).toBool() == true) {
         arguments.append(path + QDir::separator() + QLatin1String("Morrowind.ini"));
     } else {
         arguments.append(mInstallations[path].iniPath);

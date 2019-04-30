@@ -43,8 +43,19 @@ namespace Resource
         objectsToRemove.clear();
     }
 
+    void MultiObjectCache::clear()
+    {
+        OpenThreads::ScopedLock<OpenThreads::Mutex> lock(_objectCacheMutex);
+        _objectCache.clear();
+    }
+
     void MultiObjectCache::addEntryToObjectCache(const std::string &filename, osg::Object *object)
     {
+        if (!object)
+        {
+            OSG_ALWAYS << " trying to add NULL object to cache for " << filename << std::endl;
+            return;
+        }
         OpenThreads::ScopedLock<OpenThreads::Mutex> lock(_objectCacheMutex);
         _objectCache.insert(std::make_pair(filename, object));
     }
@@ -74,6 +85,12 @@ namespace Resource
             osg::Object* object = itr->second.get();
             object->releaseGLObjects(state);
         }
+    }
+
+    unsigned int MultiObjectCache::getCacheSize() const
+    {
+        OpenThreads::ScopedLock<OpenThreads::Mutex> lock(_objectCacheMutex);
+        return _objectCache.size();
     }
 
 }

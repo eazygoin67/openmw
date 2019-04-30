@@ -7,9 +7,12 @@
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_ListBox.h>
 #include <MyGUI_InputManager.h>
+#include <MyGUI_LanguageManager.h>
 
 #include <osgDB/ReadFile>
 #include <osg/Texture2D>
+
+#include <components/debug/debuglog.hpp>
 
 #include <components/myguiplatform/myguitexture.hpp>
 
@@ -28,15 +31,14 @@
 #include "../mwstate/character.hpp"
 
 #include "confirmationdialog.hpp"
-#include "widgets.hpp"
 
 namespace MWGui
 {
     SaveGameDialog::SaveGameDialog()
         : WindowModal("openmw_savegame_dialog.layout")
         , mSaving(true)
-        , mCurrentCharacter(NULL)
-        , mCurrentSlot(NULL)
+        , mCurrentCharacter(nullptr)
+        , mCurrentSlot(nullptr)
     {
         getWidget(mScreenshot, "Screenshot");
         getWidget(mCharacterSelection, "SelectCharacter");
@@ -50,13 +52,17 @@ namespace MWGui
         mOkButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SaveGameDialog::onOkButtonClicked);
         mCancelButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SaveGameDialog::onCancelButtonClicked);
         mDeleteButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SaveGameDialog::onDeleteButtonClicked);
-        mCharacterSelection->eventComboAccept += MyGUI::newDelegate(this, &SaveGameDialog::onCharacterSelected);
+        mCharacterSelection->eventComboChangePosition += MyGUI::newDelegate(this, &SaveGameDialog::onCharacterSelected);
+        mCharacterSelection->eventComboAccept += MyGUI::newDelegate(this, &SaveGameDialog::onCharacterAccept);
         mSaveList->eventListChangePosition += MyGUI::newDelegate(this, &SaveGameDialog::onSlotSelected);
         mSaveList->eventListMouseItemActivate += MyGUI::newDelegate(this, &SaveGameDialog::onSlotMouseClick);
         mSaveList->eventListSelectAccept += MyGUI::newDelegate(this, &SaveGameDialog::onSlotActivated);
         mSaveList->eventKeyButtonPressed += MyGUI::newDelegate(this, &SaveGameDialog::onKeyButtonPressed);
         mSaveNameEdit->eventEditSelectAccept += MyGUI::newDelegate(this, &SaveGameDialog::onEditSelectAccept);
         mSaveNameEdit->eventEditTextChange += MyGUI::newDelegate(this, &SaveGameDialog::onSaveNameChanged);
+
+        // To avoid accidental deletions
+        mDeleteButton->setNeedKeyFocus(false);
     }
 
     void SaveGameDialog::onSlotActivated(MyGUI::ListBox *sender, size_t pos)
@@ -80,6 +86,7 @@ namespace MWGui
         dialog->eventOkClicked.clear();
         dialog->eventOkClicked += MyGUI::newDelegate(this, &SaveGameDialog::onDeleteSlotConfirmed);
         dialog->eventCancelClicked.clear();
+        dialog->eventCancelClicked += MyGUI::newDelegate(this, &SaveGameDialog::onDeleteSlotCancel);
     }
 
     void SaveGameDialog::onDeleteSlotConfirmed()
@@ -92,7 +99,7 @@ namespace MWGui
         if (mSaveList->getItemCount() == 0)
         {
             size_t previousIndex = mCharacterSelection->getIndexSelected();
-            mCurrentCharacter = NULL;
+            mCurrentCharacter = nullptr;
             mCharacterSelection->removeItemAt(previousIndex);
             if (mCharacterSelection->getItemCount())
             {
@@ -105,6 +112,11 @@ namespace MWGui
         }
     }
 
+    void SaveGameDialog::onDeleteSlotCancel()
+    {
+        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mSaveList);
+    }
+
     void SaveGameDialog::onSaveNameChanged(MyGUI::EditBox *sender)
     {
         // This might have previously been a save slot from the list. If so, that is no longer the case
@@ -115,22 +127,27 @@ namespace MWGui
     void SaveGameDialog::onEditSelectAccept(MyGUI::EditBox *sender)
     {
         accept();
+
+        // To do not spam onEditSelectAccept() again and again
+        MWBase::Environment::get().getWindowManager()->injectKeyRelease(MyGUI::KeyCode::None);
     }
 
-    void SaveGameDialog::open()
+    void SaveGameDialog::onOpen()
     {
-        WindowModal::open();
+        WindowModal::onOpen();
 
         mSaveNameEdit->setCaption ("");
         if (mSaving)
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mSaveNameEdit);
+        else
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mSaveList);
 
         center();
 
         mCharacterSelection->setCaption("");
         mCharacterSelection->removeAllItems();
-        mCurrentCharacter = NULL;
-        mCurrentSlot = NULL;
+        mCurrentCharacter = nullptr;
+        mCurrentSlot = nullptr;
         mSaveList->removeAllItems();
         onSlotSelected(mSaveList, MyGUI::ITEM_NONE);
 
@@ -168,9 +185,9 @@ namespace MWGui
                         className = "?"; // From an older savegame format that did not support custom classes properly.
                 }
 
-                title << " (Level " << it->getSignature().mPlayerLevel << " " << className << ")";
+                title << " (#{sLevel} " << it->getSignature().mPlayerLevel << " " << MyGUI::TextIterator::toTagsString(className) << ")";
 
-                mCharacterSelection->addItem (title.str());
+                mCharacterSelection->addItem (MyGUI::LanguageManager::getInstance().replaceTags(title.str()));
 
                 if (mCurrentCharacter == &*it ||
                     (!mCurrentCharacter && !mSaving && directory==Misc::StringUtils::lowerCase (
@@ -188,11 +205,6 @@ namespace MWGui
 
         fillSaveList();
 
-    }
-
-    void SaveGameDialog::exit()
-    {
-        setVisible(false);
     }
 
     void SaveGameDialog::setLoadOrSave(bool load)
@@ -216,7 +228,7 @@ namespace MWGui
 
     void SaveGameDialog::onCancelButtonClicked(MyGUI::Widget *sender)
     {
-        exit();
+        setVisible(false);
     }
 
     void SaveGameDialog::onDeleteButtonClicked(MyGUI::Widget *sender)
@@ -230,26 +242,48 @@ namespace MWGui
         accept(true);
     }
 
+    void SaveGameDialog::onConfirmationCancel()
+    {
+        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mSaveList);
+    }
+
     void SaveGameDialog::accept(bool reallySure)
     {
         // Remove for MyGUI 3.2.2
-        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(NULL);
+        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
 
         if (mSaving)
         {
             // If overwriting an existing slot, ask for confirmation first
-            if (mCurrentSlot != NULL && !reallySure)
+            if (mCurrentSlot != nullptr && !reallySure)
             {
                 ConfirmationDialog* dialog = MWBase::Environment::get().getWindowManager()->getConfirmationDialog();
                 dialog->askForConfirmation("#{sMessage4}");
                 dialog->eventOkClicked.clear();
                 dialog->eventOkClicked += MyGUI::newDelegate(this, &SaveGameDialog::onConfirmationGiven);
                 dialog->eventCancelClicked.clear();
+                dialog->eventCancelClicked += MyGUI::newDelegate(this, &SaveGameDialog::onConfirmationCancel);
                 return;
             }
             if (mSaveNameEdit->getCaption().empty())
             {
                 MWBase::Environment::get().getWindowManager()->messageBox("#{sNotifyMessage65}");
+                return;
+            }
+        }
+        else
+        {
+            MWBase::StateManager::State state = MWBase::Environment::get().getStateManager()->getState();
+
+            // If game is running, ask for confirmation first
+            if (state == MWBase::StateManager::State_Running && !reallySure)
+            {
+                ConfirmationDialog* dialog = MWBase::Environment::get().getWindowManager()->getConfirmationDialog();
+                dialog->askForConfirmation("#{sMessage1}");
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &SaveGameDialog::onConfirmationGiven);
+                dialog->eventCancelClicked.clear();
+                dialog->eventCancelClicked += MyGUI::newDelegate(this, &SaveGameDialog::onConfirmationCancel);
                 return;
             }
         }
@@ -284,7 +318,7 @@ namespace MWGui
         MWBase::StateManager* mgr = MWBase::Environment::get().getStateManager();
 
         unsigned int i=0;
-        const MWState::Character* character = NULL;
+        const MWState::Character* character = nullptr;
         for (MWBase::StateManager::CharacterIterator it = mgr->characterBegin(); it != mgr->characterEnd(); ++it, ++i)
         {
             if (i == pos)
@@ -293,8 +327,14 @@ namespace MWGui
         assert(character && "Can't find selected character");
 
         mCurrentCharacter = character;
-        mCurrentSlot = NULL;
+        mCurrentSlot = nullptr;
         fillSaveList();
+    }
+
+    void SaveGameDialog::onCharacterAccept(MyGUI::ComboBox* sender, size_t pos)
+    {
+        // Give key focus to save list so we can confirm the selection with Enter
+        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mSaveList);
     }
 
     void SaveGameDialog::fillSaveList()
@@ -311,8 +351,6 @@ namespace MWGui
         {
             mSaveList->setIndexSelected(0);
             onSlotSelected(mSaveList, 0);
-            // Give key focus to save list so we can confirm the selection with Enter
-            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mSaveList);
         }
         else
             onSlotSelected(mSaveList, MyGUI::ITEM_NONE);
@@ -341,7 +379,7 @@ namespace MWGui
 
         if (pos == MyGUI::ITEM_NONE || !mCurrentCharacter)
         {
-            mCurrentSlot = NULL;
+            mCurrentSlot = nullptr;
             mInfoText->setCaption("");
             mScreenshot->setImageTexture("");
             return;
@@ -350,7 +388,7 @@ namespace MWGui
         if (mSaving)
             mSaveNameEdit->setCaption(sender->getItemNameAt(pos));
 
-        mCurrentSlot = NULL;
+        mCurrentSlot = nullptr;
         unsigned int i=0;
         for (MWState::Character::SlotIterator it = mCurrentCharacter->begin(); it != mCurrentCharacter->end(); ++it, ++i)
         {
@@ -366,7 +404,7 @@ namespace MWGui
         timeinfo = localtime(&time);
 
         // Use system/environment locale settings for datetime formatting
-        char* oldLctime = setlocale(LC_TIME, NULL);
+        char* oldLctime = setlocale(LC_TIME, nullptr);
         setlocale(LC_TIME, "");
 
         const int size=1024;
@@ -405,14 +443,14 @@ namespace MWGui
         osgDB::ReaderWriter* readerwriter = osgDB::Registry::instance()->getReaderWriterForExtension("jpg");
         if (!readerwriter)
         {
-            std::cerr << "Can't open savegame screenshot, no jpg readerwriter found" << std::endl;
+            Log(Debug::Error) << "Error: Can't open savegame screenshot, no jpg readerwriter found";
             return;
         }
 
         osgDB::ReaderWriter::ReadResult result = readerwriter->readImage(instream);
         if (!result.success())
         {
-            std::cerr << "Failed to read savegame screenshot: " << result.message() << " code " << result.status() << std::endl;
+            Log(Debug::Error) << "Error: Failed to read savegame screenshot: " << result.message() << " code " << result.status();
             return;
         }
 

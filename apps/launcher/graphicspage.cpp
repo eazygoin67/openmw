@@ -1,5 +1,6 @@
 #include "graphicspage.hpp"
 
+#include <csignal>
 #include <QDesktopWidget>
 #include <QMessageBox>
 #include <QDir>
@@ -12,17 +13,12 @@
 
 #include <SDL_video.h>
 
-#include <boost/math/common_factor.hpp>
-
 #include <components/files/configurationmanager.hpp>
-
-#include <components/contentselector/model/naturalsort.hpp>
-
-#include <components/settings/settings.hpp>
+#include <components/misc/gcd.hpp>
 
 QString getAspect(int x, int y)
 {
-    int gcd = boost::math::gcd (x, y);
+    int gcd = Misc::gcd (x, y);
     int xaspect = x / gcd;
     int yaspect = y / gcd;
     // special case: 8 : 5 is usually referred to as 16:10
@@ -53,6 +49,14 @@ Launcher::GraphicsPage::GraphicsPage(Files::ConfigurationManager &cfg, Settings:
 
 bool Launcher::GraphicsPage::setupSDL()
 {
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+    bool sdlConnectSuccessful = initSDL();
+    if (!sdlConnectSuccessful)
+    {
+        return false;
+    }
+#endif
+
     int displays = SDL_GetNumVideoDisplays();
 
     if (displays < 0)
@@ -71,6 +75,11 @@ bool Launcher::GraphicsPage::setupSDL()
     {
         screenComboBox->addItem(QString(tr("Screen ")) + QString::number(i + 1));
     }
+
+#if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+    // Disconnect from SDL processes
+    quitSDL();
+#endif
 
     return true;
 }

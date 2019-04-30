@@ -5,7 +5,6 @@
 
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/environment.hpp"
-#include "../mwbase/soundmanager.hpp"
 
 #include "../mwworld/class.hpp"
 
@@ -21,10 +20,10 @@ namespace MWGui
 
 DragAndDrop::DragAndDrop()
     : mIsOnDragAndDrop(false)
-    , mDraggedWidget(NULL)
-    , mSourceModel(NULL)
-    , mSourceView(NULL)
-    , mSourceSortModel(NULL)
+    , mDraggedWidget(nullptr)
+    , mSourceModel(nullptr)
+    , mSourceView(nullptr)
+    , mSourceSortModel(nullptr)
     , mDraggedCount(0)
 {
 }
@@ -64,7 +63,7 @@ void DragAndDrop::startDrag (int index, SortFilterItemModel* sortModel, ItemMode
     }
 
     std::string sound = mItem.mBase.getClass().getUpSoundId(mItem.mBase);
-    MWBase::Environment::get().getSoundManager()->playSound (sound, 1.0, 1.0);
+    MWBase::Environment::get().getWindowManager()->playSound (sound);
 
     if (mSourceSortModel)
     {
@@ -94,7 +93,7 @@ void DragAndDrop::startDrag (int index, SortFilterItemModel* sortModel, ItemMode
 void DragAndDrop::drop(ItemModel *targetModel, ItemView *targetView)
 {
     std::string sound = mItem.mBase.getClass().getDownSoundId(mItem.mBase);
-    MWBase::Environment::get().getSoundManager()->playSound (sound, 1.0, 1.0);
+    MWBase::Environment::get().getWindowManager()->playSound(sound);
 
     // We can't drop a conjured item to the ground; the target container should always be the source container
     if (mItem.mFlags & ItemStack::Flag_Bound && targetModel != mSourceModel)
@@ -122,10 +121,18 @@ void DragAndDrop::drop(ItemModel *targetModel, ItemView *targetView)
     mSourceView->update();
 }
 
+void DragAndDrop::onFrame()
+{
+    if (mIsOnDragAndDrop && mItem.mBase.getRefData().getCount() == 0)
+        finish();
+}
+
 void DragAndDrop::finish()
 {
     mIsOnDragAndDrop = false;
     mSourceSortModel->clearDragItems();
+    // since mSourceView doesn't get updated in drag()
+    MWBase::Environment::get().getWindowManager()->getInventoryWindow()->updateItemView();
 
     MyGUI::Gui::getInstance().destroyWidget(mDraggedWidget);
     mDraggedWidget = 0;

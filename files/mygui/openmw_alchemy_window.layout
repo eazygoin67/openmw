@@ -1,17 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <MyGUI type="Layout">
-    <Widget type="Window" skin="MW_Window_NoCaption" layer="Windows" position="0 0 588 444" name="_Main">
+    <Widget type="Window" skin="MW_Window_NoCaption" layer="Windows" align="Center" position="0 0 588 444" name="_Main">
        <Property key="MinSize" value="425 360"/>
 
         <!-- Name -->
 
-        <Widget type="TextBox" skin="SandText" position="10 10 65 24">
+        <Widget type="TextBox" skin="SandText" position="10 8 65 30">
             <Property key="Caption" value="#{sName}"/>
             <Property key="TextAlign" value="Left"/>
         </Widget>
 
-        <Widget type="EditBox" skin="MW_TextEdit" position="70 10 492 24" align="Top Left HStretch" name="NameEdit"/>
+        <Widget type="EditBox" skin="MW_TextEdit" position="70 8 492 30" align="Top Left HStretch" name="NameEdit">
+        </Widget>
 
 
         <!-- Apparatus -->
@@ -73,11 +74,22 @@
 
         <!-- Buttons -->
 
-        <Widget type="HBox" skin="" position="110 374 452 24" align="Bottom Right">
-
-            <Widget type="Widget">
-                <UserString key="HStretch" value="true"/>
+        <Widget type="HBox" skin="" position="10 374 552 28" align="Bottom HStretch">
+            <Widget type="AutoSizedButton" skin="MW_Button" name="DecreaseButton">
+                <Property key="Caption" value=" - "/>
+                <Property key="NeedKey" value="false"/>
             </Widget>
+
+            <Widget type="NumericEditBox" skin="MW_TextEdit" position="0 0 96 25" name="BrewCount">
+                <Property key="TextAlign" value="Center"/>
+            </Widget>
+
+            <Widget type="AutoSizedButton" skin="MW_Button" name="IncreaseButton">
+                <Property key="Caption" value=" + "/>
+                <Property key="NeedKey" value="false"/>
+            </Widget>
+
+            <Widget type="Spacer"/>
 
             <Widget type="AutoSizedButton" skin="MW_Button" name="CreateButton">
                 <Property key="Caption" value="#{sCreate}"/>

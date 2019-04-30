@@ -1,6 +1,8 @@
 #ifndef MWGUI_LOADINGSCREEN_H
 #define MWGUI_LOADINGSCREEN_H
 
+#include <memory>
+
 #include <osg/Timer>
 #include <osg/ref_ptr>
 
@@ -34,8 +36,8 @@ namespace MWGui
         virtual ~LoadingScreen();
 
         /// Overridden from Loading::Listener, see the Loading::Listener documentation for usage details
-        virtual void setLabel (const std::string& label, bool important);
-        virtual void loadingOn();
+        virtual void setLabel (const std::string& label, bool important, bool center);
+        virtual void loadingOn(bool visible=true);
         virtual void loadingOff();
         virtual void setProgressRange (size_t range);
         virtual void setProgress (size_t value);
@@ -43,9 +45,13 @@ namespace MWGui
 
         virtual void setVisible(bool visible);
 
+        double getTargetFrameRate() const;
+
     private:
         void findSplashScreens();
         bool needToDrawLoadingScreen();
+
+        void setupCopyFramebufferToTextureCallback();
 
         const VFS::Manager* mVFS;
         osg::ref_ptr<osgViewer::Viewer> mViewer;
@@ -59,20 +65,23 @@ namespace MWGui
 
         bool mImportantLabel;
 
+        bool mVisible;
+
         size_t mProgress;
+
+        bool mShowWallpaper;
 
         MyGUI::Widget* mLoadingBox;
 
         MyGUI::TextBox* mLoadingText;
         MyGUI::ScrollBar* mProgressBar;
         BackgroundImage* mBackgroundImage;
+        BackgroundImage* mSceneImage;
 
         std::vector<std::string> mSplashScreens;
 
-        // TODO: add releaseGLObjects() for mTexture
-
         osg::ref_ptr<osg::Texture2D> mTexture;
-        std::auto_ptr<MyGUI::ITexture> mGuiTexture;
+        std::unique_ptr<MyGUI::ITexture> mGuiTexture;
 
         void changeWallpaper();
 

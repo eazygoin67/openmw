@@ -1,24 +1,31 @@
 #include "coloreditor.hpp"
 
 #include <QApplication>
-#include <QColor>
 #include <QColorDialog>
 #include <QDesktopWidget>
 #include <QPainter>
-#include <QRect>
 #include <QShowEvent>
 
 #include "colorpickerpopup.hpp"
 
-CSVWidget::ColorEditor::ColorEditor(const QColor &color, QWidget *parent, bool popupOnStart)
+CSVWidget::ColorEditor::ColorEditor(const QColor &color, QWidget *parent, const bool popupOnStart)
+    : ColorEditor(parent, popupOnStart)
+{
+    setColor(color);
+}
+
+CSVWidget::ColorEditor::ColorEditor(const int colorInt, QWidget *parent, const bool popupOnStart)
+    : ColorEditor(parent, popupOnStart)
+{
+    setColor(colorInt);
+}
+
+CSVWidget::ColorEditor::ColorEditor(QWidget *parent, const bool popupOnStart)
     : QPushButton(parent),
-      mColor(color),
       mColorPicker(new ColorPickerPopup(this)),
       mPopupOnStart(popupOnStart)
 {
-    setCheckable(true);
     connect(this, SIGNAL(clicked()), this, SLOT(showPicker()));
-    connect(mColorPicker, SIGNAL(hid()), this, SLOT(pickerHid()));
     connect(mColorPicker, SIGNAL(colorChanged(const QColor &)), this, SLOT(pickerColorChanged(const QColor &)));
 }
 
@@ -53,27 +60,28 @@ QColor CSVWidget::ColorEditor::color() const
     return mColor;
 }
 
+int CSVWidget::ColorEditor::colorInt() const
+{
+    return (mColor.blue() << 16) | (mColor.green() << 8) | (mColor.red());
+}
+
 void CSVWidget::ColorEditor::setColor(const QColor &color)
 {
     mColor = color;
     update();
 }
 
-void CSVWidget::ColorEditor::showPicker()
+void CSVWidget::ColorEditor::setColor(const int colorInt)
 {
-    if (isChecked())
-    {
-        mColorPicker->showPicker(calculatePopupPosition(), mColor);
-    }
-    else
-    {
-        mColorPicker->hide();
-    }
+    // Color RGB values are stored in given integer.
+    // First byte is red, second byte is green, third byte is blue.
+    QColor color = QColor(colorInt & 0xff, (colorInt >> 8) & 0xff, (colorInt >> 16) & 0xff);
+    setColor(color);
 }
 
-void CSVWidget::ColorEditor::pickerHid()
+void CSVWidget::ColorEditor::showPicker()
 {
-    setChecked(false);
+    mColorPicker->showPicker(calculatePopupPosition(), mColor);
     emit pickingFinished();
 }
 

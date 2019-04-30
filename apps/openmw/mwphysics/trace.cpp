@@ -1,14 +1,12 @@
 #include "trace.h"
 
-#include <map>
+#include <components/misc/convert.hpp>
 
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 #include <BulletCollision/CollisionShapes/btConvexShape.h>
-#include <BulletCollision/CollisionShapes/btCylinderShape.h>
 
 #include "collisiontype.hpp"
 #include "actor.hpp"
-#include "convert.hpp"
 
 namespace MWPhysics
 {
@@ -52,8 +50,8 @@ protected:
 
 void ActorTracer::doTrace(const btCollisionObject *actor, const osg::Vec3f& start, const osg::Vec3f& end, const btCollisionWorld* world)
 {
-    const btVector3 btstart = toBullet(start);
-    const btVector3 btend = toBullet(end);
+    const btVector3 btstart = Misc::Convert::toBullet(start);
+    const btVector3 btend = Misc::Convert::toBullet(end);
 
     const btTransform &trans = actor->getWorldTransform();
     btTransform from(trans);
@@ -78,6 +76,7 @@ void ActorTracer::doTrace(const btCollisionObject *actor, const osg::Vec3f& star
         mFraction = newTraceCallback.m_closestHitFraction;
         mPlaneNormal = osg::Vec3f(tracehitnormal.x(), tracehitnormal.y(), tracehitnormal.z());
         mEndPos = (end-start)*mFraction + start;
+        mHitPoint = Misc::Convert::toOsg(newTraceCallback.m_hitPointWorld);
         mHitObject = newTraceCallback.m_hitCollisionObject;
     }
     else
@@ -85,14 +84,15 @@ void ActorTracer::doTrace(const btCollisionObject *actor, const osg::Vec3f& star
         mEndPos = end;
         mPlaneNormal = osg::Vec3f(0.0f, 0.0f, 1.0f);
         mFraction = 1.0f;
-        mHitObject = NULL;
+        mHitPoint = end;
+        mHitObject = nullptr;
     }
 }
 
 void ActorTracer::findGround(const Actor* actor, const osg::Vec3f& start, const osg::Vec3f& end, const btCollisionWorld* world)
 {
-    const btVector3 btstart(start.x(), start.y(), start.z()+1.0f);
-    const btVector3 btend(end.x(), end.y(), end.z()+1.0f);
+    const btVector3 btstart(start.x(), start.y(), start.z());
+    const btVector3 btend(end.x(), end.y(), end.z());
 
     const btTransform &trans = actor->getCollisionObject()->getWorldTransform();
     btTransform from(trans.getBasis(), btstart);
@@ -104,19 +104,13 @@ void ActorTracer::findGround(const Actor* actor, const osg::Vec3f& start, const 
     newTraceCallback.m_collisionFilterMask = actor->getCollisionObject()->getBroadphaseHandle()->m_collisionFilterMask;
     newTraceCallback.m_collisionFilterMask &= ~CollisionType_Actor;
 
-    btVector3 halfExtents = toBullet(actor->getHalfExtents());
-
-    halfExtents[2] = 1.0f;
-    btCylinderShapeZ base(halfExtents);
-
-    world->convexSweepTest(&base, from, to, newTraceCallback);
+    world->convexSweepTest(actor->getConvexShape(), from, to, newTraceCallback);
     if(newTraceCallback.hasHit())
     {
         const btVector3& tracehitnormal = newTraceCallback.m_hitNormalWorld;
         mFraction = newTraceCallback.m_closestHitFraction;
         mPlaneNormal = osg::Vec3f(tracehitnormal.x(), tracehitnormal.y(), tracehitnormal.z());
         mEndPos = (end-start)*mFraction + start;
-        mEndPos[2] += 1.0f;
     }
     else
     {

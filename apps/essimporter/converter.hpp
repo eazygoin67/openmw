@@ -22,6 +22,7 @@
 #include <components/esm/globalscript.hpp>
 #include <components/esm/queststate.hpp>
 #include <components/esm/stolenitems.hpp>
+#include <components/esm/projectilestate.hpp>
 
 #include "importcrec.hpp"
 #include "importcntc.hpp"
@@ -35,6 +36,8 @@
 #include "importques.hpp"
 #include "importjour.hpp"
 #include "importscpt.hpp"
+#include "importproj.h"
+#include "importsplm.h"
 
 #include "convertacdt.hpp"
 #include "convertnpcc.hpp"
@@ -119,7 +122,7 @@ public:
         }
         else
         {
-            mContext->mPlayer.mObject.mCreatureStats.mLevel = npc.mNpdt52.mLevel;
+            mContext->mPlayer.mObject.mCreatureStats.mLevel = npc.mNpdt.mLevel;
             mContext->mPlayerBase = npc;
             ESM::SpellState::SpellParams empty;
             // FIXME: player start spells and birthsign spells aren't listed here,
@@ -202,7 +205,7 @@ public:
         bool isDeleted = false;
 
         book.load(esm, isDeleted);
-        if (book.mData.mSkillID == -1)
+        if (book.mData.mSkillId == -1)
             mContext->mPlayer.mObject.mNpcStats.mUsedIds.push_back(Misc::StringUtils::lowerCase(book.mId));
 
         mRecords[book.mId] = book;
@@ -523,7 +526,10 @@ public:
 class ConvertGAME : public Converter
 {
 public:
-    ConvertGAME() : mHasGame(false) {}
+    ConvertGAME()
+        : mHasGame(false)
+    {
+    }
 
     virtual void read(ESM::ESMReader &esm)
     {
@@ -591,6 +597,27 @@ public:
     }
 private:
     std::vector<ESM::GlobalScript> mScripts;
+};
+
+/// Projectile converter
+class ConvertPROJ : public Converter
+{
+public:
+    virtual int getStage() override { return 2; }
+    virtual void read(ESM::ESMReader& esm) override;
+    virtual void write(ESM::ESMWriter& esm) override;
+private:
+    void convertBaseState(ESM::BaseProjectileState& base, const PROJ::PNAM& pnam);
+    PROJ mProj;
+};
+
+class ConvertSPLM : public Converter
+{
+public:
+    virtual void read(ESM::ESMReader& esm) override;
+    virtual void write(ESM::ESMWriter& esm) override;
+private:
+    SPLM mSPLM;
 };
 
 }

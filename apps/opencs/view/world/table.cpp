@@ -16,6 +16,7 @@
 #include "../../model/world/idtableproxymodel.hpp"
 #include "../../model/world/idtablebase.hpp"
 #include "../../model/world/idtable.hpp"
+#include "../../model/world/landtexturetableproxymodel.hpp"
 #include "../../model/world/record.hpp"
 #include "../../model/world/columns.hpp"
 #include "../../model/world/commanddispatcher.hpp"
@@ -59,6 +60,9 @@ void CSVWorld::Table::contextMenuEvent (QContextMenuEvent *event)
             if (mCreateAction)
                 menu.addAction(mCloneAction);
         }
+
+        if (mTouchAction)
+            menu.addAction (mTouchAction);
 
         if (mCreateAction)
             menu.addAction (mCreateAction);
@@ -137,13 +141,16 @@ void CSVWorld::Table::contextMenuEvent (QContextMenuEvent *event)
 
         if (mModel->getFeatures() & CSMWorld::IdTableBase::Feature_Preview)
         {
+            const CSMWorld::UniversalId id = getUniversalId(currentRow);
+            const CSMWorld::UniversalId::Type type = id.getType();
+
             QModelIndex index = mModel->index (row,
                 mModel->findColumnIndex (CSMWorld::Columns::ColumnId_Modification));
 
             CSMWorld::RecordBase::State state = static_cast<CSMWorld::RecordBase::State> (
                 mModel->data (index).toInt());
 
-            if (state!=CSMWorld::RecordBase::State_Deleted)
+            if (state!=CSMWorld::RecordBase::State_Deleted && type != CSMWorld::UniversalId::Type_ItemLevelledList)
                 menu.addAction (mPreviewAction);
         }
     }
@@ -226,16 +233,21 @@ void CSVWorld::Table::mouseDoubleClickEvent (QMouseEvent *event)
 
 CSVWorld::Table::Table (const CSMWorld::UniversalId& id,
     bool createAndDelete, bool sorting, CSMDoc::Document& document)
-: DragRecordTable(document), mCreateAction (0),
-  mCloneAction(0), mRecordStatusDisplay (0), mJumpToAddedRecord(false), mUnselectAfterJump(false)
+    : DragRecordTable(document), mCreateAction (nullptr), mCloneAction(nullptr), mTouchAction(nullptr),
+    mRecordStatusDisplay (0), mJumpToAddedRecord(false), mUnselectAfterJump(false)
 {
     mModel = &dynamic_cast<CSMWorld::IdTableBase&> (*mDocument.getData().getTableModel (id));
 
     bool isInfoTable = id.getType() == CSMWorld::UniversalId::Type_TopicInfos ||
                        id.getType() == CSMWorld::UniversalId::Type_JournalInfos;
+    bool isLtexTable = (id.getType() == CSMWorld::UniversalId::Type_LandTextures);
     if (isInfoTable)
     {
         mProxyModel = new CSMWorld::InfoTableProxyModel(id.getType(), this);
+    }
+    else if (isLtexTable)
+    {
+        mProxyModel = new CSMWorld::LandTextureTableProxyModel (this);
     }
     else
     {
@@ -283,6 +295,7 @@ CSVWorld::Table::Table (const CSMWorld::UniversalId& id,
 
     mEditAction = new QAction (tr ("Edit Record"), this);
     connect (mEditAction, SIGNAL (triggered()), this, SLOT (editRecord()));
+    mEditAction->setIcon(QIcon(":edit-edit"));
     addAction (mEditAction);
     CSMPrefs::Shortcut* editShortcut = new CSMPrefs::Shortcut("table-edit", this);
     editShortcut->associateAction(mEditAction);
@@ -291,62 +304,81 @@ CSVWorld::Table::Table (const CSMWorld::UniversalId& id,
     {
         mCreateAction = new QAction (tr ("Add Record"), this);
         connect (mCreateAction, SIGNAL (triggered()), this, SIGNAL (createRequest()));
+        mCreateAction->setIcon(QIcon(":edit-add"));
         addAction (mCreateAction);
         CSMPrefs::Shortcut* createShortcut = new CSMPrefs::Shortcut("table-add", this);
         createShortcut->associateAction(mCreateAction);
 
         mCloneAction = new QAction (tr ("Clone Record"), this);
         connect(mCloneAction, SIGNAL (triggered()), this, SLOT (cloneRecord()));
+        mCloneAction->setIcon(QIcon(":edit-clone"));
         addAction(mCloneAction);
         CSMPrefs::Shortcut* cloneShortcut = new CSMPrefs::Shortcut("table-clone", this);
         cloneShortcut->associateAction(mCloneAction);
     }
 
+    if (mModel->getFeatures() & CSMWorld::IdTableBase::Feature_AllowTouch)
+    {
+        mTouchAction = new QAction(tr("Touch Record"), this);
+        connect(mTouchAction, SIGNAL(triggered()), this, SLOT(touchRecord()));
+        mTouchAction->setIcon(QIcon(":edit-touch"));
+        addAction(mTouchAction);
+        CSMPrefs::Shortcut* touchShortcut = new CSMPrefs::Shortcut("table-touch", this);
+        touchShortcut->associateAction(mTouchAction);
+    }
+
     mRevertAction = new QAction (tr ("Revert Record"), this);
     connect (mRevertAction, SIGNAL (triggered()), mDispatcher, SLOT (executeRevert()));
+    mRevertAction->setIcon(QIcon(":edit-undo"));
     addAction (mRevertAction);
     CSMPrefs::Shortcut* revertShortcut = new CSMPrefs::Shortcut("table-revert", this);
     revertShortcut->associateAction(mRevertAction);
 
     mDeleteAction = new QAction (tr ("Delete Record"), this);
     connect (mDeleteAction, SIGNAL (triggered()), mDispatcher, SLOT (executeDelete()));
+    mDeleteAction->setIcon(QIcon(":edit-delete"));
     addAction (mDeleteAction);
     CSMPrefs::Shortcut* deleteShortcut = new CSMPrefs::Shortcut("table-remove", this);
     deleteShortcut->associateAction(mDeleteAction);
 
-
     mMoveUpAction = new QAction (tr ("Move Up"), this);
     connect (mMoveUpAction, SIGNAL (triggered()), this, SLOT (moveUpRecord()));
+    mMoveUpAction->setIcon(QIcon(":record-up"));
     addAction (mMoveUpAction);
     CSMPrefs::Shortcut* moveUpShortcut = new CSMPrefs::Shortcut("table-moveup", this);
     moveUpShortcut->associateAction(mMoveUpAction);
 
     mMoveDownAction = new QAction (tr ("Move Down"), this);
     connect (mMoveDownAction, SIGNAL (triggered()), this, SLOT (moveDownRecord()));
+    mMoveDownAction->setIcon(QIcon(":record-down"));
     addAction (mMoveDownAction);
     CSMPrefs::Shortcut* moveDownShortcut = new CSMPrefs::Shortcut("table-movedown", this);
     moveDownShortcut->associateAction(mMoveDownAction);
 
     mViewAction = new QAction (tr ("View"), this);
     connect (mViewAction, SIGNAL (triggered()), this, SLOT (viewRecord()));
+    mViewAction->setIcon(QIcon(":/cell.png"));
     addAction (mViewAction);
     CSMPrefs::Shortcut* viewShortcut = new CSMPrefs::Shortcut("table-view", this);
     viewShortcut->associateAction(mViewAction);
 
     mPreviewAction = new QAction (tr ("Preview"), this);
     connect (mPreviewAction, SIGNAL (triggered()), this, SLOT (previewRecord()));
+    mPreviewAction->setIcon(QIcon(":edit-preview"));
     addAction (mPreviewAction);
     CSMPrefs::Shortcut* previewShortcut = new CSMPrefs::Shortcut("table-preview", this);
     previewShortcut->associateAction(mPreviewAction);
 
     mExtendedDeleteAction = new QAction (tr ("Extended Delete Record"), this);
     connect (mExtendedDeleteAction, SIGNAL (triggered()), this, SLOT (executeExtendedDelete()));
+    mExtendedDeleteAction->setIcon(QIcon(":edit-delete"));
     addAction (mExtendedDeleteAction);
     CSMPrefs::Shortcut* extendedDeleteShortcut = new CSMPrefs::Shortcut("table-extendeddelete", this);
     extendedDeleteShortcut->associateAction(mExtendedDeleteAction);
 
     mExtendedRevertAction = new QAction (tr ("Extended Revert Record"), this);
     connect (mExtendedRevertAction, SIGNAL (triggered()), this, SLOT (executeExtendedRevert()));
+    mExtendedRevertAction->setIcon(QIcon(":edit-undo"));
     addAction (mExtendedRevertAction);
     CSMPrefs::Shortcut* extendedRevertShortcut = new CSMPrefs::Shortcut("table-extendedrevert", this);
     extendedRevertShortcut->associateAction(mExtendedRevertAction);
@@ -439,6 +471,22 @@ void CSVWorld::Table::cloneRecord()
         {
             emit cloneRequest (toClone);
         }
+    }
+}
+
+void CSVWorld::Table::touchRecord()
+{
+    if (!mEditLock && mModel->getFeatures() & CSMWorld::IdTableBase::Feature_AllowTouch)
+    {
+        std::vector<CSMWorld::UniversalId> touchIds;
+
+        QModelIndexList selectedRows = selectionModel()->selectedRows();
+        for (auto it = selectedRows.begin(); it != selectedRows.end(); ++it)
+        {
+            touchIds.push_back(getUniversalId(it->row()));
+        }
+
+        emit touchRequest(touchIds);
     }
 }
 
@@ -692,7 +740,7 @@ void CSVWorld::Table::requestFocus (const std::string& id)
         scrollTo (index, QAbstractItemView::PositionAtTop);
 }
 
-void CSVWorld::Table::recordFilterChanged (boost::shared_ptr<CSMFilter::Node> filter)
+void CSVWorld::Table::recordFilterChanged (std::shared_ptr<CSMFilter::Node> filter)
 {
     mProxyModel->setFilter (filter);
     tableSizeUpdate();
@@ -730,10 +778,8 @@ std::vector< CSMWorld::UniversalId > CSVWorld::Table::getDraggedRecords() const
     QModelIndexList selectedRows = selectionModel()->selectedRows();
     std::vector<CSMWorld::UniversalId> idToDrag;
 
-    foreach (QModelIndex it, selectedRows) //I had a dream. Dream where you could use C++11 in OpenMW.
-    {
+    for (QModelIndex& it : selectedRows)
         idToDrag.push_back (getUniversalId (it.row()));
-    }
 
     return idToDrag;
 }

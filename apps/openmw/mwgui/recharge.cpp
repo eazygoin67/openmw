@@ -1,7 +1,5 @@
 #include "recharge.hpp"
 
-#include <boost/format.hpp>
-
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_Gui.h>
 
@@ -18,10 +16,8 @@
 #include "../mwworld/esmstore.hpp"
 
 #include "../mwmechanics/creaturestats.hpp"
-#include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
 
-#include "widgets.hpp"
 #include "itemwidget.hpp"
 #include "itemchargeview.hpp"
 #include "sortfilteritemmodel.hpp"
@@ -32,6 +28,7 @@ namespace MWGui
 
 Recharge::Recharge()
     : WindowBase("openmw_recharge_dialog.layout")
+    , mItemSelectionDialog(nullptr)
 {
     getWidget(mBox, "Box");
     getWidget(mGemBox, "GemBox");
@@ -44,10 +41,10 @@ Recharge::Recharge()
 
     mBox->setDisplayMode(ItemChargeView::DisplayMode_EnchantmentCharge);
 
-    setVisible(false);
+    mGemIcon->eventMouseButtonClick += MyGUI::newDelegate(this, &Recharge::onSelectItem);
 }
 
-void Recharge::open()
+void Recharge::onOpen()
 {
     center();
 
@@ -59,16 +56,11 @@ void Recharge::open()
     mBox->resetScrollbars();
 }
 
-void Recharge::exit()
-{
-    MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Recharge);
-}
-
-void Recharge::start (const MWWorld::Ptr &item)
+void Recharge::setPtr (const MWWorld::Ptr &item)
 {
     mGemIcon->setItem(item);
     mGemIcon->setUserString("ToolTipType", "ItemPtr");
-    mGemIcon->setUserData(item);
+    mGemIcon->setUserData(MWWorld::Ptr(item));
 
     updateView();
 }
@@ -86,10 +78,16 @@ void Recharge::updateView()
     mGemBox->setVisible(toolBoxVisible);
     mGemBox->setUserString("Hidden", toolBoxVisible ? "false" : "true");
 
+    if (!toolBoxVisible)
+    {
+        mGemIcon->setItem(MWWorld::Ptr());
+        mGemIcon->clearUserStrings();
+    }
+
     mBox->update();
 
     Gui::Box* box = dynamic_cast<Gui::Box*>(mMainWidget);
-    if (box == NULL)
+    if (box == nullptr)
         throw std::runtime_error("main widget must be a box");
 
     box->notifyChildrenSizeChanged();
@@ -98,7 +96,35 @@ void Recharge::updateView()
 
 void Recharge::onCancel(MyGUI::Widget *sender)
 {
-    exit();
+    MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Recharge);
+}
+
+void Recharge::onSelectItem(MyGUI::Widget *sender)
+{
+    delete mItemSelectionDialog;
+    mItemSelectionDialog = new ItemSelectionDialog("#{sSoulGemsWithSouls}");
+    mItemSelectionDialog->eventItemSelected += MyGUI::newDelegate(this, &Recharge::onItemSelected);
+    mItemSelectionDialog->eventDialogCanceled += MyGUI::newDelegate(this, &Recharge::onItemCancel);
+    mItemSelectionDialog->setVisible(true);
+    mItemSelectionDialog->openContainer(MWMechanics::getPlayer());
+    mItemSelectionDialog->setFilter(SortFilterItemModel::Filter_OnlyChargedSoulstones);
+}
+
+void Recharge::onItemSelected(MWWorld::Ptr item)
+{
+    mItemSelectionDialog->setVisible(false);
+
+    mGemIcon->setItem(item);
+    mGemIcon->setUserString ("ToolTipType", "ItemPtr");
+    mGemIcon->setUserData(item);
+
+    MWBase::Environment::get().getWindowManager()->playSound(item.getClass().getDownSoundId(item));
+    updateView();
+}
+
+void Recharge::onItemCancel()
+{
+    mItemSelectionDialog->setVisible(false);
 }
 
 void Recharge::onItemClicked(MyGUI::Widget *sender, const MWWorld::Ptr& item)
@@ -110,7 +136,6 @@ void Recharge::onItemClicked(MyGUI::Widget *sender, const MWWorld::Ptr& item)
 
     MWWorld::Ptr player = MWMechanics::getPlayer();
     MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
-    MWMechanics::NpcStats& npcStats = player.getClass().getNpcStats(player);
 
     float luckTerm = 0.1f * stats.getAttribute(ESM::Attribute::Luck).getModified();
     if (luckTerm < 1|| luckTerm > 10)
@@ -123,7 +148,7 @@ void Recharge::onItemClicked(MyGUI::Widget *sender, const MWWorld::Ptr& item)
     if (intelligenceTerm < 1)
         intelligenceTerm = 1;
 
-    float x = (npcStats.getSkill(ESM::Skill::Enchant).getModified() + intelligenceTerm + luckTerm) * stats.getFatigueTerm();
+    float x = (player.getClass().getSkill(player, ESM::Skill::Enchant) + intelligenceTerm + luckTerm) * stats.getFatigueTerm();
     int roll = Misc::Rng::roll0to99();
     if (roll < x)
     {
@@ -137,17 +162,23 @@ void Recharge::onItemClicked(MyGUI::Widget *sender, const MWWorld::Ptr& item)
         item.getCellRef().setEnchantmentCharge(
             std::min(item.getCellRef().getEnchantmentCharge() + restored, static_cast<float>(enchantment->mData.mCharge)));
 
-        player.getClass().getContainerStore(player).restack(item);
+        MWBase::Environment::get().getWindowManager()->playSound("Enchant Success");
 
-        player.getClass().skillUsageSucceeded (player, ESM::Skill::Enchant, 0);
+        player.getClass().getContainerStore(player).restack(item);
+    }
+    else
+    {
+        MWBase::Environment::get().getWindowManager()->playSound("Enchant Fail");
     }
 
+    player.getClass().skillUsageSucceeded (player, ESM::Skill::Enchant, 0);
     gem.getContainerStore()->remove(gem, 1, player);
 
     if (gem.getRefData().getCount() == 0)
     {
-        std::string message = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("sNotifyMessage51")->getString();
-        message = boost::str(boost::format(message) % gem.getClass().getName(gem));
+        std::string message = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("sNotifyMessage51")->mValue.getString();
+        Misc::StringUtils::replace(message, "%s", gem.getClass().getName(gem).c_str(), 2);
+
         MWBase::Environment::get().getWindowManager()->messageBox(message);
 
         // special case: readd Azura's Star

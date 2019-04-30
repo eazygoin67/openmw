@@ -2,7 +2,6 @@
 
 #include <cstdlib>
 
-#include <components/compiler/extensions.hpp>
 #include <components/compiler/opcodes.hpp>
 #include <components/compiler/locals.hpp>
 
@@ -25,6 +24,7 @@
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/cellstore.hpp"
 
+#include "../mwmechanics/aicast.hpp"
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/spellcasting.hpp"
@@ -106,8 +106,7 @@ namespace MWScript
             virtual void execute (Interpreter::Runtime& runtime)
             {
                 MWBase::World* world = MWBase::Environment::get().getWorld();
-                MWWorld::Ptr player = world->getPlayerPtr();
-                runtime.push (!world->isOnGround(player) && !world->isFlying(player));
+                runtime.push (world->getPlayer().getJumping());
             }
         };
 
@@ -131,16 +130,14 @@ namespace MWScript
                 }
         };
 
+        template <class R>
         class OpOnActivate : public Interpreter::Opcode0
         {
             public:
 
                 virtual void execute (Interpreter::Runtime& runtime)
                 {
-                    InterpreterContext& context =
-                        static_cast<InterpreterContext&> (runtime.getContext());
-
-                    MWWorld::Ptr ptr = context.getReference();
+                    MWWorld::Ptr ptr = R()(runtime);
 
                     runtime.push (ptr.getRefData().onActivate());
                 }
@@ -235,10 +232,10 @@ namespace MWScript
                 virtual void execute (Interpreter::Runtime& runtime)
                 {
                     bool enabled =
-                        MWBase::Environment::get().getWorld()->toggleRenderMode (MWRender::Render_BoundingBoxes);
+                        MWBase::Environment::get().getWorld()->toggleRenderMode (MWRender::Render_CollisionDebug);
 
                     runtime.getContext().report (enabled ?
-                        "Bounding Box Rendering -> On" : "Bounding Box Rendering -> Off");
+                        "Collision Mesh Rendering -> On" : "Collision Mesh Rendering -> Off");
                 }
         };
 
@@ -253,6 +250,20 @@ namespace MWScript
 
                     runtime.getContext().report (enabled ?
                         "Wireframe Rendering -> On" : "Wireframe Rendering -> Off");
+                }
+        };
+
+        class OpToggleBorders : public Interpreter::Opcode0
+        {
+            public:
+
+                virtual void execute (Interpreter::Runtime& runtime)
+                {
+                    bool enabled =
+                        MWBase::Environment::get().getWorld()->toggleBorders();
+
+                    runtime.getContext().report (enabled ?
+                        "Border Rendering -> On" : "Border Rendering -> Off");
                 }
         };
 
@@ -419,6 +430,12 @@ namespace MWScript
                     std::string effect = runtime.getStringLiteral(runtime[0].mInteger);
                     runtime.pop();
 
+                    if (!ptr.getClass().isActor())
+                    {
+                        runtime.push(0);
+                        return;
+                    }
+
                     char *end;
                     long key = strtol(effect.c_str(), &end, 10);
                     if(key < 0 || key > 32767 || *end != '\0')
@@ -456,7 +473,13 @@ namespace MWScript
                     store.get<ESM::Creature>().find(creature); // This line throws an exception if it can't find the creature
 
                     MWWorld::Ptr item = *ptr.getClass().getContainerStore(ptr).add(gem, 1, ptr);
+
+                    // Set the soul on just one of the gems, not the whole stack
+                    item.getContainerStore()->unstack(item, ptr);
                     item.getCellRef().setSoul(creature);
+
+                    // Restack the gem with other gems with the same soul
+                    item.getContainerStore()->restack(item);
                 }
         };
 
@@ -519,7 +542,7 @@ namespace MWScript
                         int numNotEquipped = invStorePtr->count(item);
                         for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
                         {
-                            MWWorld::ContainerStoreIterator it = invStorePtr->getSlot (slot);
+                            MWWorld::ConstContainerStoreIterator it = invStorePtr->getSlot (slot);
                             if (it != invStorePtr->end() && ::Misc::StringUtils::ciEqual(it->getCellRef().getRefId(), item))
                             {
                                 numNotEquipped -= it->getRefData().getCount();
@@ -640,6 +663,12 @@ namespace MWScript
                     MWWorld::Ptr ptr = R()(runtime);
                     std::string id = runtime.getStringLiteral(runtime[0].mInteger);
                     runtime.pop();
+
+                    if (!ptr.getClass().isActor())
+                    {
+                        runtime.push(0);
+                        return;
+                    }
 
                     const MWMechanics::CreatureStats& stats = ptr.getClass().getCreatureStats(ptr);
                     runtime.push(stats.getActiveSpells().isSpellActive(id) || stats.getSpells().isSpellActive(id));
@@ -922,7 +951,7 @@ namespace MWScript
 
                 const std::string script = ptr.getClass().getScript(ptr);
                 if(script.empty())
-                    str<< ptr.getCellRef().getRefId()<<"  does not have a script.";
+                    str<< ptr.getCellRef().getRefId()<<" does not have a script.";
                 else
                 {
                     str<< "Local variables for "<<ptr.getCellRef().getRefId();
@@ -1038,15 +1067,38 @@ namespace MWScript
             {
                 MWWorld::Ptr ptr = R()(runtime);
 
-                std::string spell = runtime.getStringLiteral (runtime[0].mInteger);
+                std::string spellId = runtime.getStringLiteral (runtime[0].mInteger);
                 runtime.pop();
 
                 std::string targetId = ::Misc::StringUtils::lowerCase(runtime.getStringLiteral (runtime[0].mInteger));
                 runtime.pop();
 
+                const ESM::Spell* spell = MWBase::Environment::get().getWorld()->getStore().get<ESM::Spell>().find (spellId);
+                if (!spell)
+                {
+                    runtime.getContext().report("spellcasting failed: can not find spell \""+spellId+"\"");
+                    return;
+                }
+
+                if (spell->mData.mType != ESM::Spell::ST_Spell && spell->mData.mType != ESM::Spell::ST_Power)
+                {
+                    runtime.getContext().report("spellcasting failed: you can cast only spells and powers.");
+                    return;
+                }
+
+                // Obviously we can not use casting animation for player here
+                if (ptr.getClass().isActor() && ptr != MWMechanics::getPlayer())
+                {
+                    MWMechanics::AiCast castPackage(targetId, spellId, true);
+                    ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(castPackage, ptr);
+
+                    return;
+                }
+
                 MWWorld::Ptr target = MWBase::Environment::get().getWorld()->getPtr (targetId, false);
 
-                MWMechanics::CastSpell cast(ptr, target);
+                MWMechanics::CastSpell cast(ptr, target, false, true);
+                cast.playSpellCastingEffects(spell->mId, false);
                 cast.mHitPosition = target.getRefData().getPosition().asVec3();
                 cast.mAlwaysSucceed = true;
                 cast.cast(spell);
@@ -1064,7 +1116,7 @@ namespace MWScript
                 std::string spell = runtime.getStringLiteral (runtime[0].mInteger);
                 runtime.pop();
 
-                MWMechanics::CastSpell cast(ptr, ptr);
+                MWMechanics::CastSpell cast(ptr, ptr, false, true);
                 cast.mHitPosition = ptr.getRefData().getPosition().asVec3();
                 cast.mAlwaysSucceed = true;
                 cast.cast(spell);
@@ -1120,8 +1172,7 @@ namespace MWScript
 
                 virtual void execute (Interpreter::Runtime &runtime)
                 {
-                    /// \todo implement traveling check
-                    runtime.push (0);
+                    runtime.push (MWBase::Environment::get().getWorld()->isPlayerTraveling());
                 }
         };
 
@@ -1252,10 +1303,83 @@ namespace MWScript
             }
         };
 
+        template <class R>
+        class OpShowSceneGraph : public Interpreter::Opcode1
+        {
+        public:
+            virtual void execute(Interpreter::Runtime &runtime, unsigned int arg0)
+            {
+                MWWorld::Ptr ptr = R()(runtime, false);
+
+                int confirmed = 0;
+                if (arg0==1)
+                {
+                    confirmed = runtime[0].mInteger;
+                    runtime.pop();
+                }
+
+                if (ptr.isEmpty() && !confirmed)
+                    runtime.getContext().report("Exporting the entire scene graph will result in a large file. Confirm this action using 'showscenegraph 1' or select an object instead.");
+                else
+                {
+                    const std::string& filename = MWBase::Environment::get().getWorld()->exportSceneGraph(ptr);
+                    runtime.getContext().report("Wrote '" + filename + "'");
+                }
+            }
+        };
+
+        class OpToggleNavMesh : public Interpreter::Opcode0
+        {
+            public:
+
+                virtual void execute (Interpreter::Runtime& runtime)
+                {
+                    bool enabled =
+                        MWBase::Environment::get().getWorld()->toggleRenderMode (MWRender::Render_NavMesh);
+
+                    runtime.getContext().report (enabled ?
+                        "Navigation Mesh Rendering -> On" : "Navigation Mesh Rendering -> Off");
+                }
+        };
+
+        class OpToggleActorsPaths : public Interpreter::Opcode0
+        {
+            public:
+
+                virtual void execute (Interpreter::Runtime& runtime)
+                {
+                    bool enabled =
+                        MWBase::Environment::get().getWorld()->toggleRenderMode (MWRender::Render_ActorsPaths);
+
+                    runtime.getContext().report (enabled ?
+                        "Agents Paths Rendering -> On" : "Agents Paths Rendering -> Off");
+                }
+        };
+
+        class OpSetNavMeshNumberToRender : public Interpreter::Opcode0
+        {
+            public:
+
+                virtual void execute (Interpreter::Runtime& runtime)
+                {
+                    const auto navMeshNumber = runtime[0].mInteger;
+                    runtime.pop();
+
+                    if (navMeshNumber < 0)
+                    {
+                        runtime.getContext().report("Invalid navmesh number: use not less than zero values");
+                        return;
+                    }
+
+                    MWBase::Environment::get().getWorld()->setNavMeshNumberToRender(static_cast<std::size_t>(navMeshNumber));
+                }
+        };
+
         void installOpcodes (Interpreter::Interpreter& interpreter)
         {
             interpreter.installSegment5 (Compiler::Misc::opcodeXBox, new OpXBox);
-            interpreter.installSegment5 (Compiler::Misc::opcodeOnActivate, new OpOnActivate);
+            interpreter.installSegment5 (Compiler::Misc::opcodeOnActivate, new OpOnActivate<ImplicitRef>);
+            interpreter.installSegment5 (Compiler::Misc::opcodeOnActivateExplicit, new OpOnActivate<ExplicitRef>);
             interpreter.installSegment5 (Compiler::Misc::opcodeActivate, new OpActivate<ImplicitRef>);
             interpreter.installSegment5 (Compiler::Misc::opcodeActivateExplicit, new OpActivate<ExplicitRef>);
             interpreter.installSegment3 (Compiler::Misc::opcodeLock, new OpLock<ImplicitRef>);
@@ -1348,6 +1472,12 @@ namespace MWScript
             interpreter.installSegment5 (Compiler::Misc::opcodeRemoveFromLevCreature, new OpRemoveFromLevCreature);
             interpreter.installSegment5 (Compiler::Misc::opcodeAddToLevItem, new OpAddToLevItem);
             interpreter.installSegment5 (Compiler::Misc::opcodeRemoveFromLevItem, new OpRemoveFromLevItem);
+            interpreter.installSegment3 (Compiler::Misc::opcodeShowSceneGraph, new OpShowSceneGraph<ImplicitRef>);
+            interpreter.installSegment3 (Compiler::Misc::opcodeShowSceneGraphExplicit, new OpShowSceneGraph<ExplicitRef>);
+            interpreter.installSegment5 (Compiler::Misc::opcodeToggleBorders, new OpToggleBorders);
+            interpreter.installSegment5 (Compiler::Misc::opcodeToggleNavMesh, new OpToggleNavMesh);
+            interpreter.installSegment5 (Compiler::Misc::opcodeToggleActorsPaths, new OpToggleActorsPaths);
+            interpreter.installSegment5 (Compiler::Misc::opcodeSetNavMeshNumberToRender, new OpSetNavMeshNumberToRender);
         }
     }
 }

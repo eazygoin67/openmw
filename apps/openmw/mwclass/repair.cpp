@@ -3,14 +3,11 @@
 #include <components/esm/loadrepa.hpp>
 
 #include "../mwbase/environment.hpp"
-#include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwworld/ptr.hpp"
-#include "../mwworld/actiontake.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwphysics/physicssystem.hpp"
-#include "../mwworld/nullaction.hpp"
 #include "../mwworld/actionrepair.hpp"
 
 #include "../mwgui/tooltips.hpp"
@@ -51,7 +48,7 @@ namespace MWClass
         return ref->mBase->mName;
     }
 
-    boost::shared_ptr<MWWorld::Action> Repair::activate (const MWWorld::Ptr& ptr,
+    std::shared_ptr<MWWorld::Action> Repair::activate (const MWWorld::Ptr& ptr,
         const MWWorld::Ptr& actor) const
     {
         return defaultItemActivate(ptr, actor);
@@ -74,7 +71,7 @@ namespace MWClass
 
     void Repair::registerSelf()
     {
-        boost::shared_ptr<Class> instance (new Repair);
+        std::shared_ptr<Class> instance (new Repair);
 
         registerClass (typeid (ESM::Repair).name(), instance);
     }
@@ -149,9 +146,9 @@ namespace MWClass
         return MWWorld::Ptr(cell.insert(ref), &cell);
     }
 
-    boost::shared_ptr<MWWorld::Action> Repair::use (const MWWorld::Ptr& ptr) const
+    std::shared_ptr<MWWorld::Action> Repair::use (const MWWorld::Ptr& ptr, bool force) const
     {
-        return boost::shared_ptr<MWWorld::Action>(new MWWorld::ActionRepair(ptr));
+        return std::shared_ptr<MWWorld::Action>(new MWWorld::ActionRepair(ptr, force));
     }
 
     bool Repair::canSell (const MWWorld::ConstPtr& item, int npcServices) const

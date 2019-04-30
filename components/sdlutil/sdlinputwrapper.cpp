@@ -1,7 +1,6 @@
 #include "sdlinputwrapper.hpp"
 
-#include <iostream>
-#include <stdexcept>
+#include <components/debug/debuglog.hpp>
 
 #include <osgViewer/Viewer>
 
@@ -11,10 +10,10 @@ namespace SDLUtil
 InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> viewer, bool grab) :
         mSDLWindow(window),
         mViewer(viewer),
-        mMouseListener(NULL),
-        mKeyboardListener(NULL),
-        mWindowListener(NULL),
-        mConListener(NULL),
+        mMouseListener(nullptr),
+        mKeyboardListener(nullptr),
+        mWindowListener(nullptr),
+        mConListener(nullptr),
         mWarpX(0),
         mWarpY(0),
         mWarpCompensate(false),
@@ -86,21 +85,22 @@ InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> v
                     mMouseListener->mouseReleased(evt.button, evt.button.button);
                     break;
                 case SDL_KEYDOWN:
-                    if (!evt.key.repeat)
-                        mKeyboardListener->keyPressed(evt.key);
+                    mKeyboardListener->keyPressed(evt.key);
 
-                    // temporary for the stats viewer
-                    if (evt.key.keysym.sym == SDLK_F3)
-                        mViewer->getEventQueue()->keyPress(osgGA::GUIEventAdapter::KEY_F3);
+                    if (!isModifierHeld(KMOD_ALT) && evt.key.keysym.sym >= SDLK_F1 && evt.key.keysym.sym <= SDLK_F12)
+                    {
+                        mViewer->getEventQueue()->keyPress(osgGA::GUIEventAdapter::KEY_F1 + (evt.key.keysym.sym - SDLK_F1));
+                    }
 
                     break;
                 case SDL_KEYUP:
                     if (!evt.key.repeat)
+                    {
                         mKeyboardListener->keyReleased(evt.key);
 
-                    // temporary for the stats viewer
-                    if (evt.key.keysym.sym == SDLK_F3)
-                        mViewer->getEventQueue()->keyRelease(osgGA::GUIEventAdapter::KEY_F3);
+                        if (!isModifierHeld(KMOD_ALT) && evt.key.keysym.sym >= SDLK_F1 && evt.key.keysym.sym <= SDLK_F12)
+                            mViewer->getEventQueue()->keyRelease(osgGA::GUIEventAdapter::KEY_F1 + (evt.key.keysym.sym - SDLK_F1));
+                    }
 
                     break;
                 case SDL_TEXTEDITING:
@@ -160,9 +160,7 @@ InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> v
                     break;
 
                 default:
-                    std::ios::fmtflags f(std::cerr.flags());
-                    std::cerr << "Unhandled SDL event of type 0x" << std::hex << evt.type << std::endl;
-                    std::cerr.flags(f);
+                    Log(Debug::Info) << "Unhandled SDL event of type 0x" << std::hex << evt.type;
                     break;
             }
         }
@@ -217,24 +215,26 @@ InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> v
             case SDL_WINDOWEVENT_CLOSE:
                 break;
             case SDL_WINDOWEVENT_SHOWN:
+            case SDL_WINDOWEVENT_RESTORED:
                 if (mWindowListener)
                     mWindowListener->windowVisibilityChange(true);
                 break;
             case SDL_WINDOWEVENT_HIDDEN:
+            case SDL_WINDOWEVENT_MINIMIZED:
                 if (mWindowListener)
                     mWindowListener->windowVisibilityChange(false);
                 break;
         }
     }
 
-    bool InputWrapper::isModifierHeld(SDL_Keymod mod)
+    bool InputWrapper::isModifierHeld(int mod)
     {
         return (SDL_GetModState() & mod) != 0;
     }
 
     bool InputWrapper::isKeyDown(SDL_Scancode key)
     {
-        return (SDL_GetKeyboardState(NULL)[key]) != 0;
+        return (SDL_GetKeyboardState(nullptr)[key]) != 0;
     }
 
     /// \brief Moves the mouse to the specified point within the viewport
@@ -325,8 +325,8 @@ InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> v
 
         SDL_GetWindowSize(mSDLWindow, &width, &height);
 
-        const int FUDGE_FACTOR_X = width;
-        const int FUDGE_FACTOR_Y = height;
+        const int FUDGE_FACTOR_X = width/4;
+        const int FUDGE_FACTOR_Y = height/4;
 
         //warp the mouse if it's about to go outside the window
         if(evt.x - FUDGE_FACTOR_X < 0  || evt.x + FUDGE_FACTOR_X > width
@@ -368,7 +368,7 @@ InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> v
         }
         else
         {
-            throw new std::runtime_error("Tried to package non-motion event!");
+            throw std::runtime_error("Tried to package non-motion event!");
         }
 
         return pack_evt;
@@ -417,7 +417,6 @@ InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> v
         mKeyMap.insert( KeyMap::value_type(SDLK_o, OIS::KC_O) );
         mKeyMap.insert( KeyMap::value_type(SDLK_p, OIS::KC_P) );
         mKeyMap.insert( KeyMap::value_type(SDLK_RETURN, OIS::KC_RETURN) );
-        mKeyMap.insert( KeyMap::value_type(SDLK_LCTRL, OIS::KC_LCONTROL));
         mKeyMap.insert( KeyMap::value_type(SDLK_a, OIS::KC_A) );
         mKeyMap.insert( KeyMap::value_type(SDLK_s, OIS::KC_S) );
         mKeyMap.insert( KeyMap::value_type(SDLK_d, OIS::KC_D) );
@@ -493,9 +492,20 @@ InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> v
         mKeyMap.insert( KeyMap::value_type(SDLK_INSERT, OIS::KC_INSERT) );
         mKeyMap.insert( KeyMap::value_type(SDLK_DELETE, OIS::KC_DELETE) );
         mKeyMap.insert( KeyMap::value_type(SDLK_KP_ENTER, OIS::KC_NUMPADENTER) );
-        mKeyMap.insert( KeyMap::value_type(SDLK_RCTRL, OIS::KC_RCONTROL) );
+        mKeyMap.insert( KeyMap::value_type(SDLK_APPLICATION, OIS::KC_APPS) );
+
+//The function of the Ctrl and Meta keys are switched on macOS compared to other platforms.
+//For instance, Cmd+C versus Ctrl+C to copy from the system clipboard
+#if defined(__APPLE__)
+        mKeyMap.insert( KeyMap::value_type(SDLK_LGUI, OIS::KC_LCONTROL) );
+        mKeyMap.insert( KeyMap::value_type(SDLK_RGUI, OIS::KC_RCONTROL) );
+        mKeyMap.insert( KeyMap::value_type(SDLK_LCTRL, OIS::KC_LWIN));
+        mKeyMap.insert( KeyMap::value_type(SDLK_RCTRL, OIS::KC_RWIN) );
+#else
         mKeyMap.insert( KeyMap::value_type(SDLK_LGUI, OIS::KC_LWIN) );
         mKeyMap.insert( KeyMap::value_type(SDLK_RGUI, OIS::KC_RWIN) );
-        mKeyMap.insert( KeyMap::value_type(SDLK_APPLICATION, OIS::KC_APPS) );
+        mKeyMap.insert( KeyMap::value_type(SDLK_LCTRL, OIS::KC_LCONTROL));
+        mKeyMap.insert( KeyMap::value_type(SDLK_RCTRL, OIS::KC_RCONTROL) );
+#endif
     }
 }

@@ -10,8 +10,6 @@
 #include <osgViewer/View>
 #include <osgViewer/CompositeViewer>
 
-#include <boost/shared_ptr.hpp>
-
 #include "lightingday.hpp"
 #include "lightingnight.hpp"
 #include "lightingbright.hpp"
@@ -66,6 +64,8 @@ namespace CSVRender
             osg::ref_ptr<osgViewer::View> mView;
             osg::ref_ptr<osg::Group> mRootNode;
 
+            void updateCameraParameters(double overrideAspect = -1.0);
+
             QTimer mTimer;
 
         protected slots:
@@ -78,7 +78,7 @@ namespace CSVRender
     {
             Q_OBJECT
         public:
-            SceneWidget(boost::shared_ptr<Resource::ResourceSystem> resourceSystem, QWidget* parent = 0,
+            SceneWidget(std::shared_ptr<Resource::ResourceSystem> resourceSystem, QWidget* parent = 0,
                     Qt::WindowFlags f = 0, bool retrieveInput = true);
             virtual ~SceneWidget();
 
@@ -89,6 +89,8 @@ namespace CSVRender
             void setDefaultAmbient (const osg::Vec4f& colour);
             ///< \note The actual ambient colour may differ based on lighting settings.
 
+            void setExterior (bool isExterior);
+
         protected:
             void setLighting (Lighting *lighting);
             ///< \attention The ownership of \a lighting is not transferred to *this.
@@ -98,12 +100,13 @@ namespace CSVRender
             virtual void mouseMoveEvent (QMouseEvent *event);
             virtual void wheelEvent (QWheelEvent *event);
 
-            boost::shared_ptr<Resource::ResourceSystem> mResourceSystem;
+            std::shared_ptr<Resource::ResourceSystem> mResourceSystem;
 
             Lighting* mLighting;
 
             osg::Vec4f mDefaultAmbient;
             bool mHasDefaultAmbient;
+            bool mIsExterior;
             LightingDay mLightingDay;
             LightingNight mLightingNight;
             LightingBright mLightingBright;

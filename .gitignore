@@ -8,6 +8,10 @@ makefile
 build*
 prebuilt
 
+##windows build process
+/deps
+/MSVC*
+
 ## doxygen
 Doxygen
 
@@ -22,6 +26,8 @@ Doxygen
 .settings
 .directory
 .idea
+cmake-build-*
+files/windows/*.aps
 ## qt-creator
 CMakeLists.txt.user*
 
@@ -75,6 +81,4 @@ moc_*.cxx
 *ui_playpage.h
 *.[ao]
 *.so
-gamecontrollerdb.txt
-openmw.appdata.xml
 venv/

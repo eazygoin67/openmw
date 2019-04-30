@@ -1,12 +1,15 @@
 #include "spellwindow.hpp"
 
-#include <boost/format.hpp>
-
+#include <MyGUI_EditBox.h>
 #include <MyGUI_InputManager.h>
+
+#include <components/misc/stringops.hpp>
+#include <components/settings/settings.hpp>
 
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/class.hpp"
@@ -28,15 +31,19 @@ namespace MWGui
     SpellWindow::SpellWindow(DragAndDrop* drag)
         : WindowPinnableBase("openmw_spell_window.layout")
         , NoDrop(drag, mMainWidget)
-        , mSpellView(NULL)
+        , mSpellView(nullptr)
         , mUpdateTimer(0.0f)
     {
         mSpellIcons = new SpellIcons();
 
         getWidget(mSpellView, "SpellView");
         getWidget(mEffectBox, "EffectsBox");
+        getWidget(mFilterEdit, "FilterEdit");
+
+        mFilterEdit->setUserString("IgnoreTabKey", "y");
 
         mSpellView->eventSpellClicked += MyGUI::newDelegate(this, &SpellWindow::onModelIndexSelected);
+        mFilterEdit->eventEditTextChange += MyGUI::newDelegate(this, &SpellWindow::onFilterChanged);
 
         setCoord(498, 300, 302, 300);
     }
@@ -48,6 +55,8 @@ namespace MWGui
 
     void SpellWindow::onPinToggled()
     {
+        Settings::Manager::setBool("spells pin", "Windows", mPinned);
+
         MWBase::Environment::get().getWindowManager()->setSpellVisibility(!mPinned);
     }
 
@@ -57,30 +66,36 @@ namespace MWGui
             MWBase::Environment::get().getWindowManager()->toggleVisible(GW_Magic);
     }
 
-    void SpellWindow::open()
+    void SpellWindow::onOpen()
     {
+        // Reset the filter focus when opening the window
+        MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget();
+        if (focus == mFilterEdit)
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
+
         updateSpells();
     }
 
     void SpellWindow::onFrame(float dt) 
-    { 
-        if (mMainWidget->getVisible())
+    {
+        NoDrop::onFrame(dt);
+        mUpdateTimer += dt;
+        if (0.5f < mUpdateTimer)
         {
-            NoDrop::onFrame(dt);
-            mUpdateTimer += dt;
-            if (0.5f < mUpdateTimer)
-            {
-                mUpdateTimer = 0;
-                mSpellView->incrementalUpdate();
-            }
+            mUpdateTimer = 0;
+            mSpellView->incrementalUpdate();
         }
+
+        // Update effects in-game too if the window is pinned
+        if (mPinned && !MWBase::Environment::get().getWindowManager()->isGuiMode())
+            mSpellIcons->updateWidgets(mEffectBox, false);
     }
 
     void SpellWindow::updateSpells()
     {
         mSpellIcons->updateWidgets(mEffectBox, false);
 
-        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer()));
+        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer(), mFilterEdit->getCaption()));
     }
 
     void SpellWindow::onEnchantedItemSelected(MWWorld::Ptr item, bool alreadyEquipped)
@@ -141,7 +156,7 @@ namespace MWGui
             mSpellToDelete = spellId;
             ConfirmationDialog* dialog = MWBase::Environment::get().getWindowManager()->getConfirmationDialog();
             std::string question = MWBase::Environment::get().getWindowManager()->getGameSettingString("sQuestionDeleteSpell", "Delete %s?");
-            question = boost::str(boost::format(question) % spell->mName);
+            Misc::StringUtils::replace(question, "%s", spell->mName.c_str(), 2);
             dialog->askForConfirmation(question);
             dialog->eventOkClicked.clear();
             dialog->eventOkClicked += MyGUI::newDelegate(this, &SpellWindow::onDeleteSpellAccept);
@@ -163,6 +178,11 @@ namespace MWGui
             else
                 onSpellSelected(spell.mId);
         }
+    }
+
+    void SpellWindow::onFilterChanged(MyGUI::EditBox *sender)
+    {
+        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer(), sender->getCaption()));
     }
 
     void SpellWindow::onSpellSelected(const std::string& spellId)
@@ -191,7 +211,16 @@ namespace MWGui
 
     void SpellWindow::cycle(bool next)
     {
-        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer()));
+        MWWorld::Ptr player = MWMechanics::getPlayer();
+
+        if (MWBase::Environment::get().getMechanicsManager()->isAttackingOrSpell(player))
+            return;
+
+        const MWMechanics::CreatureStats &stats = player.getClass().getCreatureStats(player);
+        if (stats.isParalyzed() || stats.getKnockedDown() || stats.isDead() || stats.getHitRecovery())
+            return;
+
+        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer(), ""));
 
         SpellModel::ModelIndex selected = 0;
         for (SpellModel::ModelIndex i = 0; i<int(mSpellView->getModel()->getItemCount()); ++i)

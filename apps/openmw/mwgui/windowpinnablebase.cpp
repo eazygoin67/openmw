@@ -14,12 +14,12 @@ namespace MWGui
 
         mPinButton->eventMouseButtonPressed += MyGUI::newDelegate(this, &WindowPinnableBase::onPinButtonPressed);
 
-        MyGUI::Button* button = NULL;
+        MyGUI::Button* button = nullptr;
         MyGUI::VectorWidgetPtr widgets = window->getSkinWidgetsByName("Action");
-        for (MyGUI::VectorWidgetPtr::iterator it = widgets.begin(); it != widgets.end(); ++it)
+        for (MyGUI::Widget* widget : widgets)
         {
-            if ((*it)->isUserString("HideWindowOnDoubleClick"))
-                button = (*it)->castType<MyGUI::Button>();
+            if (widget->isUserString("HideWindowOnDoubleClick"))
+                button = widget->castType<MyGUI::Button>();
         }
 
         if (button)

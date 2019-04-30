@@ -3,7 +3,6 @@
 #include <stdexcept>
 #include <limits>
 
-#include <components/compiler/extensions.hpp>
 #include <components/compiler/opcodes.hpp>
 
 #include <components/interpreter/interpreter.hpp>
@@ -42,6 +41,9 @@ namespace MWScript
                 {
                     MWWorld::Ptr ptr = R()(runtime);
 
+                    if (!ptr.getRefData().isEnabled())
+                        return;
+
                     std::string group = runtime.getStringLiteral (runtime[0].mInteger);
                     runtime.pop();
 
@@ -68,6 +70,9 @@ namespace MWScript
                 virtual void execute (Interpreter::Runtime& runtime, unsigned int arg0)
                 {
                     MWWorld::Ptr ptr = R()(runtime);
+
+                    if (!ptr.getRefData().isEnabled())
+                        return;
 
                     std::string group = runtime.getStringLiteral (runtime[0].mInteger);
                     runtime.pop();

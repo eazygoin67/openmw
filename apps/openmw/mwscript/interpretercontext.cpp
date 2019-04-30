@@ -4,8 +4,6 @@
 #include <stdexcept>
 #include <sstream>
 
-#include <components/interpreter/types.hpp>
-
 #include <components/compiler/locals.hpp>
 
 #include <components/esm/cellid.hpp>
@@ -18,6 +16,7 @@
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/inputmanager.hpp"
 
+#include "../mwworld/action.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/containerstore.hpp"
@@ -137,7 +136,7 @@ namespace MWScript
 
 
     InterpreterContext::InterpreterContext (
-        MWScript::Locals *locals, MWWorld::Ptr reference, const std::string& targetId)
+        MWScript::Locals *locals, const MWWorld::Ptr& reference, const std::string& targetId)
     : mLocals (locals), mReference (reference), mTargetId (targetId)
     {
         // If we run on a reference (local script, dialogue script or console with object
@@ -288,10 +287,17 @@ namespace MWScript
         return "None";
     }
 
-    std::string InterpreterContext::getNPCName() const
+    std::string InterpreterContext::getActorName() const
     {
-        ESM::NPC npc = *getReferenceImp().get<ESM::NPC>()->mBase;
-        return npc.mName;
+        const MWWorld::Ptr& ptr = getReferenceImp();
+        if (ptr.getClass().isNpc())
+        {
+            const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+            return npc->mName;
+        }
+
+        const ESM::Creature* creature = ptr.get<ESM::Creature>()->mBase;
+        return creature->mName;
     }
 
     std::string InterpreterContext::getNPCRace() const
@@ -406,7 +412,7 @@ namespace MWScript
         const MWWorld::ESMStore &store = world->getStore();
         const ESM::Faction *faction = store.get<ESM::Faction>().find(factionId);
 
-        if(rank < 0 || rank > 9)
+        if(rank < 0)
             return "";
 
         return faction->mRanks[rank];
@@ -463,7 +469,7 @@ namespace MWScript
         const MWWorld::Ptr ref = MWBase::Environment::get().getWorld()->getPtr(name, false);
 
         // If the objects are in different worldspaces, return a large value (just like vanilla)
-        if (ref.getCell()->getCell()->getCellId().mWorldspace != ref2.getCell()->getCell()->getCellId().mWorldspace)
+        if (!ref.isInCell() || !ref2.isInCell() || ref.getCell()->getCell()->getCellId().mWorldspace != ref2.getCell()->getCell()->getCellId().mWorldspace)
             return std::numeric_limits<float>::max();
 
         double diff[3];
@@ -478,8 +484,12 @@ namespace MWScript
 
     void InterpreterContext::executeActivation(MWWorld::Ptr ptr, MWWorld::Ptr actor)
     {
-        boost::shared_ptr<MWWorld::Action> action = (ptr.getClass().activate(ptr, actor));
+        std::shared_ptr<MWWorld::Action> action = (ptr.getClass().activate(ptr, actor));
         action->execute (actor);
+        if (action->getTarget() != MWWorld::Ptr() && action->getTarget() != ptr)
+        {
+            updatePtr(ptr, action->getTarget());
+        }
     }
 
     float InterpreterContext::getSecondsPassed() const
@@ -576,6 +586,10 @@ namespace MWScript
     void InterpreterContext::updatePtr(const MWWorld::Ptr& base, const MWWorld::Ptr& updated)
     {
         if (!mReference.isEmpty() && base == mReference)
+        {
             mReference = updated;
+            if (mLocals == &base.getRefData().getLocals())
+                mLocals = &mReference.getRefData().getLocals();
+        }
     }
 }

@@ -2,15 +2,13 @@
 
 #include <stdexcept>
 
-#include <boost/format.hpp>
-
 #include <MyGUI_LanguageManager.h>
 
-#include <components/compiler/extensions.hpp>
+#include <components/debug/debuglog.hpp>
+
 #include <components/compiler/opcodes.hpp>
 
 #include <components/interpreter/interpreter.hpp>
-#include <components/interpreter/runtime.hpp>
 #include <components/interpreter/opcodes.hpp>
 
 #include <components/misc/stringops.hpp>
@@ -21,13 +19,13 @@
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
 
+#include "../mwworld/action.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
 #include "../mwworld/inventorystore.hpp"
 
 #include "../mwmechanics/actorutil.hpp"
 
-#include "interpretercontext.hpp"
 #include "ref.hpp"
 
 namespace MWScript
@@ -62,7 +60,19 @@ namespace MWScript
                             || ::Misc::StringUtils::ciEqual(item, "gold_100"))
                         item = "gold_001";
 
-                    MWWorld::Ptr itemPtr = *ptr.getClass().getContainerStore (ptr).add (item, count, ptr);
+                    MWWorld::ContainerStore& store = ptr.getClass().getContainerStore (ptr);
+                    // Create a Ptr for the first added item to recover the item name later
+                    MWWorld::Ptr itemPtr = *store.add (item, 1, ptr);
+                    if (itemPtr.getClass().getScript(itemPtr).empty())
+                    {
+                        store.add (item, count-1, ptr);
+                    }
+                    else
+                    {
+                        // Adding just one item per time to make sure there isn't a stack of scripted items
+                        for (int i = 1; i < count; i++)
+                            store.add (item, 1, ptr);
+                    }
 
                     // Spawn a messagebox (only for items added to player's inventory and if player is talking to someone)
                     if (ptr == MWBase::Environment::get().getWorld ()->getPlayerPtr() )
@@ -73,13 +83,13 @@ namespace MWScript
                         if (count == 1)
                         {
                             msgBox = MyGUI::LanguageManager::getInstance().replaceTags("#{sNotifyMessage60}");
-                            msgBox = boost::str(boost::format(msgBox) % itemName);
                         }
                         else
                         {
                             msgBox = MyGUI::LanguageManager::getInstance().replaceTags("#{sNotifyMessage61}");
-                            msgBox = boost::str(boost::format(msgBox) % count % itemName);
+                            ::Misc::StringUtils::replace(msgBox, "%d", std::to_string(count).c_str(), 2);
                         }
+                        ::Misc::StringUtils::replace(msgBox, "%s", itemName.c_str(), 2);
                         MWBase::Environment::get().getWindowManager()->messageBox(msgBox, MWGui::ShowInDialogueMode_Only);
                     }
                 }
@@ -140,9 +150,14 @@ namespace MWScript
                     MWWorld::ContainerStore& store = ptr.getClass().getContainerStore (ptr);
 
                     std::string itemName;
-                    for (MWWorld::ContainerStoreIterator iter(store.begin()); iter != store.end(); ++iter)
+                    for (MWWorld::ConstContainerStoreIterator iter(store.cbegin()); iter != store.cend(); ++iter)
+                    {
                         if (::Misc::StringUtils::ciEqual(iter->getCellRef().getRefId(), item))
+                        {
                             itemName = iter->getClass().getName(*iter);
+                            break;
+                        }
+                    }
 
                     int numRemoved = store.remove(item, count, ptr);
 
@@ -153,16 +168,16 @@ namespace MWScript
                         // The two GMST entries below expand to strings informing the player of what, and how many of it has been removed from their inventory
                         std::string msgBox;
 
-                        if(numRemoved > 1)
+                        if (numRemoved > 1)
                         {
                             msgBox = MyGUI::LanguageManager::getInstance().replaceTags("#{sNotifyMessage63}");
-                            msgBox = boost::str (boost::format(msgBox) % numRemoved % itemName);
+                            ::Misc::StringUtils::replace(msgBox, "%d", std::to_string(numRemoved).c_str(), 2);
                         }
                         else
                         {
                             msgBox = MyGUI::LanguageManager::getInstance().replaceTags("#{sNotifyMessage62}");
-                            msgBox = boost::str (boost::format(msgBox) % itemName);
                         }
+                        ::Misc::StringUtils::replace(msgBox, "%s", itemName.c_str(), 2);
                         MWBase::Environment::get().getWindowManager()->messageBox(msgBox, MWGui::ShowInDialogueMode_Only);
                     }
                 }
@@ -190,16 +205,17 @@ namespace MWScript
                     if (it == invStore.end())
                     {
                         it = ptr.getClass().getContainerStore (ptr).add (item, 1, ptr);
-                        std::cerr << "Implicitly adding one " << item << " to container "
-                            "to fulfil requirements of Equip instruction" << std::endl;
+                        Log(Debug::Warning) << "Implicitly adding one " << item << 
+                            " to the inventory store of " << ptr.getCellRef().getRefId() <<
+                            " to fulfill the requirements of Equip instruction";
                     }
 
-                    if (ptr == MWBase::Environment::get().getWorld()->getPlayerPtr())
-                        MWBase::Environment::get().getWindowManager()->useItem(*it);
+                    if (ptr == MWMechanics::getPlayer())
+                        MWBase::Environment::get().getWindowManager()->useItem(*it, true);
                     else
                     {
-                        boost::shared_ptr<MWWorld::Action> action = it->getClass().use(*it);
-                        action->execute(ptr);
+                        std::shared_ptr<MWWorld::Action> action = it->getClass().use(*it, true);
+                        action->execute(ptr, true);
                     }
                 }
         };
@@ -256,9 +272,9 @@ namespace MWScript
                             throw std::runtime_error ("armor index out of range");
                     }
 
-                    MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore (ptr);
-
-                    MWWorld::ContainerStoreIterator it = invStore.getSlot (slot);
+                    const MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore (ptr);
+                    MWWorld::ConstContainerStoreIterator it = invStore.getSlot (slot);
+                    
                     if (it == invStore.end() || it->getTypeName () != typeid(ESM::Armor).name())
                     {
                         runtime.push(-1);
@@ -289,10 +305,10 @@ namespace MWScript
                     std::string item = runtime.getStringLiteral (runtime[0].mInteger);
                     runtime.pop();
 
-                    MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore (ptr);
+                    const MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore (ptr);
                     for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
                     {
-                        MWWorld::ContainerStoreIterator it = invStore.getSlot (slot);
+                        MWWorld::ConstContainerStoreIterator it = invStore.getSlot (slot);
                         if (it != invStore.end() && ::Misc::StringUtils::ciEqual(it->getCellRef().getRefId(), item))
                         {
                             runtime.push(1);
@@ -316,9 +332,9 @@ namespace MWScript
                     runtime.pop();
 
                     int count = 0;
-                    MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore (ptr);
-                    for (MWWorld::ContainerStoreIterator it = invStore.begin(MWWorld::ContainerStore::Type_Miscellaneous);
-                         it != invStore.end(); ++it)
+                    const MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore (ptr);
+                    for (MWWorld::ConstContainerStoreIterator it = invStore.cbegin(MWWorld::ContainerStore::Type_Miscellaneous);
+                         it != invStore.cend(); ++it)
                     {
                         if (::Misc::StringUtils::ciEqual(it->getCellRef().getSoul(), name))
                             count += it->getRefData().getCount();
@@ -336,8 +352,8 @@ namespace MWScript
                 {
                     MWWorld::Ptr ptr = R()(runtime);
 
-                    MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore (ptr);
-                    MWWorld::ContainerStoreIterator it = invStore.getSlot (MWWorld::InventoryStore::Slot_CarriedRight);
+                    const MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore (ptr);
+                    MWWorld::ConstContainerStoreIterator it = invStore.getSlot (MWWorld::InventoryStore::Slot_CarriedRight);
                     if (it == invStore.end() || it->getTypeName () != typeid(ESM::Weapon).name())
                     {
                         runtime.push(-1);

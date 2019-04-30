@@ -156,7 +156,9 @@ CSVTools::ReportTable::ReportTable (CSMDoc::Document& document,
     setSelectionMode (QAbstractItemView::ExtendedSelection);
 
     mProxyModel = new QSortFilterProxyModel (this);
+    mProxyModel->setSortCaseSensitivity(Qt::CaseInsensitive);
     mProxyModel->setSourceModel (mModel);
+    mProxyModel->setSortRole(Qt::UserRole);
 
     setModel (mProxyModel);
     setColumnHidden (2, true);

@@ -1,10 +1,11 @@
 #include "scriptmanagerimp.hpp"
 
 #include <cassert>
-#include <iostream>
 #include <sstream>
 #include <exception>
 #include <algorithm>
+
+#include <components/debug/debuglog.hpp>
 
 #include <components/esm/loadscpt.hpp>
 
@@ -21,10 +22,10 @@
 
 namespace MWScript
 {
-    ScriptManager::ScriptManager (const MWWorld::ESMStore& store, bool verbose,
+    ScriptManager::ScriptManager (const MWWorld::ESMStore& store,
         Compiler::Context& compilerContext, int warningsMode,
         const std::vector<std::string>& scriptBlacklist)
-    : mErrorHandler (std::cerr), mStore (store), mVerbose (verbose),
+    : mErrorHandler(), mStore (store),
       mCompilerContext (compilerContext), mParser (mErrorHandler, mCompilerContext),
       mOpcodesInstalled (false), mGlobalScripts (store)
     {
@@ -44,8 +45,7 @@ namespace MWScript
 
         if (const ESM::Script *script = mStore.get<ESM::Script>().find (name))
         {
-            if (mVerbose)
-                std::cout << "compiling script: " << name << std::endl;
+            mErrorHandler.setContext(name);
 
             bool Success = true;
             try
@@ -66,16 +66,13 @@ namespace MWScript
             }
             catch (const std::exception& error)
             {
-                std::cerr << "An exception has been thrown: " << error.what() << std::endl;
+                Log(Debug::Error) << "Error: An exception has been thrown: " << error.what();
                 Success = false;
             }
 
             if (!Success)
             {
-                std::cerr
-                    << "compiling failed: " << name << std::endl;
-                if (mVerbose)
-                    std::cerr << script->mScriptText << std::endl << std::endl;
+                Log(Debug::Error) << "Error: script compiling failed: " << name;
             }
 
             if (Success)
@@ -124,8 +121,8 @@ namespace MWScript
             }
             catch (const std::exception& e)
             {
-                std::cerr << "Execution of script " << name << " failed:" << std::endl;
-                std::cerr << e.what() << std::endl;
+                Log(Debug::Error) << "Execution of script " << name << " failed:";
+                Log(Debug::Error) << e.what();
 
                 iter->second.first.clear(); // don't execute again.
             }
@@ -172,12 +169,9 @@ namespace MWScript
 
         if (const ESM::Script *script = mStore.get<ESM::Script>().search (name2))
         {
-            if (mVerbose)
-                std::cout
-                    << "scanning script for local variable declarations: " << name2
-                    << std::endl;
-
             Compiler::Locals locals;
+
+            mErrorHandler.setContext(name2 + "[local variables]");
 
             std::istringstream stream (script->mScriptText);
             Compiler::QuickFileParser parser (mErrorHandler, mCompilerContext, locals);

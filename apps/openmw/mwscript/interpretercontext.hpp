@@ -1,12 +1,9 @@
 #ifndef GAME_SCRIPT_INTERPRETERCONTEXT_H
 #define GAME_SCRIPT_INTERPRETERCONTEXT_H
 
-#include <boost/shared_ptr.hpp>
-
 #include <components/interpreter/context.hpp>
 
 #include "../mwworld/ptr.hpp"
-#include "../mwworld/action.hpp"
 
 namespace MWSound
 {
@@ -51,7 +48,7 @@ namespace MWScript
 
         public:
 
-            InterpreterContext (MWScript::Locals *locals, MWWorld::Ptr reference,
+            InterpreterContext (MWScript::Locals *locals, const MWWorld::Ptr& reference,
                 const std::string& targetId = "");
             ///< The ownership of \a locals is not transferred. 0-pointer allowed.
 
@@ -95,7 +92,7 @@ namespace MWScript
 
             virtual std::string getActionBinding(const std::string& action) const;
 
-            virtual std::string getNPCName() const;
+            virtual std::string getActorName() const;
 
             virtual std::string getNPCRace() const;
 

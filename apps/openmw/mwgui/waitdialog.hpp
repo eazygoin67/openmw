@@ -4,6 +4,7 @@
 #include "timeadvancer.hpp"
 
 #include "windowbase.hpp"
+#include "referenceinterface.hpp"
 
 namespace MWGui
 {
@@ -13,7 +14,7 @@ namespace MWGui
     public:
         WaitDialogProgressBar();
 
-        virtual void open();
+        virtual void onOpen();
 
         void setProgress(int cur, int total);
 
@@ -22,22 +23,26 @@ namespace MWGui
         MyGUI::TextBox* mProgressText;
     };
 
-    class WaitDialog : public WindowBase
+    class WaitDialog : public WindowBase, public ReferenceInterface
     {
     public:
         WaitDialog();
 
-        virtual void open();
+        void setPtr(const MWWorld::Ptr &ptr);
 
-        virtual void exit();
+        virtual void onOpen();
+
+        virtual bool exit();
+
+        virtual void clear();
 
         void onFrame(float dt);
-
-        void bedActivated() { setCanRest(true); }
 
         bool getSleeping() { return mTimeAdvancer.isRunning() && mSleeping; }
         void wakeUp();
         void autosave();
+
+        WindowBase* getProgressBar() { return &mProgressBar; }
 
     protected:
         MyGUI::TextBox* mDateTimeText;
@@ -59,10 +64,13 @@ namespace MWGui
 
         WaitDialogProgressBar mProgressBar;
 
+        virtual void onReferenceUnavailable();
+
         void onUntilHealedButtonClicked(MyGUI::Widget* sender);
         void onWaitButtonClicked(MyGUI::Widget* sender);
         void onCancelButtonClicked(MyGUI::Widget* sender);
         void onHourSliderChangedPosition(MyGUI::ScrollBar* sender, size_t position);
+        void onKeyButtonPressed(MyGUI::Widget* sender, MyGUI::KeyCode key, MyGUI::Char character);
 
         void onWaitingProgressChanged(int cur, int total);
         void onWaitingInterrupted();

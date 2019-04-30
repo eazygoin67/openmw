@@ -2,15 +2,14 @@
 
 #include <components/esm/loaddoor.hpp>
 #include <components/esm/doorstate.hpp>
+#include <components/sceneutil/positionattitudetransform.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
-#include "../mwbase/mechanicsmanager.hpp"
 
 #include "../mwworld/ptr.hpp"
-#include "../mwworld/nullaction.hpp"
 #include "../mwworld/failedaction.hpp"
 #include "../mwworld/actionteleport.hpp"
 #include "../mwworld/actiondoor.hpp"
@@ -26,6 +25,7 @@
 #include "../mwrender/objects.hpp"
 #include "../mwrender/renderinginterface.hpp"
 #include "../mwrender/animation.hpp"
+#include "../mwrender/vismask.hpp"
 
 #include "../mwmechanics/actorutil.hpp"
 
@@ -55,8 +55,10 @@ namespace MWClass
 
     void Door::insertObjectRendering (const MWWorld::Ptr& ptr, const std::string& model, MWRender::RenderingInterface& renderingInterface) const
     {
-        if (!model.empty()) {
+        if (!model.empty())
+        {
             renderingInterface.getObjects().insertModel(ptr, model, true);
+            ptr.getRefData().getBaseNode()->setNodeMask(MWRender::Mask_Static);
         }
     }
 
@@ -74,8 +76,16 @@ namespace MWClass
                 MWBase::Environment::get().getWorld()->activateDoor(ptr, customData.mDoorState);
             }
         }
+    }
 
-        MWBase::Environment::get().getMechanicsManager()->add(ptr);
+    bool Door::isDoor() const
+    {
+        return true;
+    }
+
+    bool Door::useAnim() const
+    {
+        return true;
     }
 
     std::string Door::getModel(const MWWorld::ConstPtr &ptr) const
@@ -96,7 +106,7 @@ namespace MWClass
         return ref->mBase->mName;
     }
 
-    boost::shared_ptr<MWWorld::Action> Door::activate (const MWWorld::Ptr& ptr,
+    std::shared_ptr<MWWorld::Action> Door::activate (const MWWorld::Ptr& ptr,
         const MWWorld::Ptr& actor) const
     {
         MWWorld::LiveCellRef<ESM::Door> *ref = ptr.get<ESM::Door>();
@@ -113,31 +123,37 @@ namespace MWClass
         bool hasKey = false;
         std::string keyName;
 
+        // FIXME: If NPC activate teleporting door, it can lead to crash due to iterator invalidation in the Actors update.
+        // Make such activation a no-op for now, like how it is in the vanilla game.
+        if (actor != MWMechanics::getPlayer() && ptr.getCellRef().getTeleport())
+        {
+            std::shared_ptr<MWWorld::Action> action(new MWWorld::FailedAction(std::string(), ptr));
+            action->setSound(lockedSound);
+            return action;
+        }
+
         // make door glow if player activates it with telekinesis
-        if (actor == MWBase::Environment::get().getWorld()->getPlayerPtr() &&
-            MWBase::Environment::get().getWorld()->getDistanceToFacedObject() > 
+        if (actor == MWMechanics::getPlayer() &&
+            MWBase::Environment::get().getWorld()->getDistanceToFacedObject() >
             MWBase::Environment::get().getWorld()->getMaxActivationDistance())
         {
             MWRender::Animation* animation = MWBase::Environment::get().getWorld()->getAnimation(ptr);
 
-            const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();            
+            const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
             int index = ESM::MagicEffect::effectStringToId("sEffectTelekinesis");
             const ESM::MagicEffect *effect = store.get<ESM::MagicEffect>().find(index);
 
             animation->addSpellCastGlow(effect, 1); // 1 second glow to match the time taken for a door opening or closing
         }
 
-        // make key id lowercase
-        std::string keyId = ptr.getCellRef().getKey();
-        Misc::StringUtils::lowerCaseInPlace(keyId);
-        for (MWWorld::ContainerStoreIterator it = invStore.begin(); it != invStore.end(); ++it)
+        const std::string keyId = ptr.getCellRef().getKey();
+        if (!keyId.empty())
         {
-            std::string refId = it->getCellRef().getRefId();
-            Misc::StringUtils::lowerCaseInPlace(refId);
-            if (refId == keyId)
+            MWWorld::Ptr keyPtr = invStore.search(keyId);
+            if (!keyPtr.isEmpty())
             {
                 hasKey = true;
-                keyName = it->getClass().getName(*it);
+                keyName = keyPtr.getClass().getName(keyPtr);
             }
         }
 
@@ -151,9 +167,7 @@ namespace MWClass
             if(isTrapped)
             {
                 ptr.getCellRef().setTrap("");
-                MWBase::Environment::get().getSoundManager()->playSound3D(ptr,
-                    "Disarm Trap", 1.0f, 1.0f, MWBase::SoundManager::Play_TypeSfx,
-                    MWBase::SoundManager::Play_Normal);
+                MWBase::Environment::get().getSoundManager()->playSound3D(ptr, "Disarm Trap", 1.0f, 1.0f);
                 isTrapped = false;
             }
         }
@@ -163,7 +177,7 @@ namespace MWClass
             if(isTrapped)
             {
                 // Trap activation
-                boost::shared_ptr<MWWorld::Action> action(new MWWorld::ActionTrap(ptr.getCellRef().getTrap(), ptr));
+                std::shared_ptr<MWWorld::Action> action(new MWWorld::ActionTrap(ptr.getCellRef().getTrap(), ptr));
                 action->setSound(trapActivationSound);
                 return action;
             }
@@ -173,20 +187,20 @@ namespace MWClass
                 if (actor == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getDistanceToFacedObject() > MWBase::Environment::get().getWorld()->getMaxActivationDistance())
                 {
                     // player activated teleport door with telekinesis
-                    boost::shared_ptr<MWWorld::Action> action(new MWWorld::FailedAction);
+                    std::shared_ptr<MWWorld::Action> action(new MWWorld::FailedAction);
                     return action;
                 }
                 else
                 {
-                    boost::shared_ptr<MWWorld::Action> action(new MWWorld::ActionTeleport (ptr.getCellRef().getDestCell(), ptr.getCellRef().getDoorDest(), true));
+                    std::shared_ptr<MWWorld::Action> action(new MWWorld::ActionTeleport (ptr.getCellRef().getDestCell(), ptr.getCellRef().getDoorDest(), true));
                     action->setSound(openSound);
                     return action;
-                }              
+                }
             }
             else
             {
                 // animated door
-                boost::shared_ptr<MWWorld::Action> action(new MWWorld::ActionDoor(ptr));
+                std::shared_ptr<MWWorld::Action> action(new MWWorld::ActionDoor(ptr));
                 int doorstate = getDoorState(ptr);
                 bool opening = true;
                 float doorRot = ptr.getRefData().getPosition().rot[2] - ptr.getCellRef().getPosition().rot[2];
@@ -201,7 +215,7 @@ namespace MWClass
                             closeSound, 0.5f);
                     // Doors rotate at 90 degrees per second, so start the sound at
                     // where it would be at the current rotation.
-                    float offset = doorRot/(3.14159265f * 0.5f);
+                    float offset = doorRot/(osg::PI * 0.5f);
                     action->setSoundOffset(offset);
                     action->setSound(openSound);
                 }
@@ -209,7 +223,7 @@ namespace MWClass
                 {
                     MWBase::Environment::get().getSoundManager()->fadeOutSound3D(ptr,
                                                 openSound, 0.5f);
-                    float offset = 1.0f - doorRot/(3.14159265f * 0.5f);
+                    float offset = 1.0f - doorRot/(osg::PI * 0.5f);
                     action->setSoundOffset(std::max(offset, 0.0f));
                     action->setSound(closeSound);
                 }
@@ -220,7 +234,7 @@ namespace MWClass
         else
         {
             // locked, and we can't open.
-            boost::shared_ptr<MWWorld::Action> action(new MWWorld::FailedAction(std::string(), ptr));
+            std::shared_ptr<MWWorld::Action> action(new MWWorld::FailedAction(std::string(), ptr));
             action->setSound(lockedSound);
             return action;
         }
@@ -228,15 +242,16 @@ namespace MWClass
 
     void Door::lock (const MWWorld::Ptr& ptr, int lockLevel) const
     {
-        if(lockLevel!=0)
-            ptr.getCellRef().setLockLevel(abs(lockLevel)); //Changes lock to locklevel, in positive
+        if(lockLevel != 0)
+            ptr.getCellRef().setLockLevel(abs(lockLevel)); //Changes lock to locklevel, if positive
         else
-            ptr.getCellRef().setLockLevel(abs(ptr.getCellRef().getLockLevel())); //No locklevel given, just flip the original one
+            ptr.getCellRef().setLockLevel(ESM::UnbreakableLock); // If zero, set to max lock level
     }
 
     void Door::unlock (const MWWorld::Ptr& ptr) const
     {
-        ptr.getCellRef().setLockLevel(-abs(ptr.getCellRef().getLockLevel())); //Makes lockLevel negative
+        int lockLevel = ptr.getCellRef().getLockLevel();
+        ptr.getCellRef().setLockLevel(-abs(lockLevel)); //Makes lockLevel negative
     }
 
     bool Door::canLock(const MWWorld::ConstPtr &ptr) const
@@ -261,7 +276,7 @@ namespace MWClass
 
     void Door::registerSelf()
     {
-        boost::shared_ptr<Class> instance (new Door);
+        std::shared_ptr<Class> instance (new Door);
 
         registerClass (typeid (ESM::Door).name(), instance);
     }
@@ -288,7 +303,8 @@ namespace MWClass
             text += "\n" + getDestination(*ref);
         }
 
-        if (ptr.getCellRef().getLockLevel() > 0)
+        int lockLevel = ptr.getCellRef().getLockLevel();
+        if (lockLevel > 0 && lockLevel != ESM::UnbreakableLock)
             text += "\n#{sLockLevel}: " + MWGui::ToolTips::toString(ptr.getCellRef().getLockLevel());
         else if (ptr.getCellRef().getLockLevel() < 0)
             text += "\n#{sUnlocked}";
@@ -347,7 +363,7 @@ namespace MWClass
     {
         if (!ptr.getRefData().getCustomData())
         {
-            std::auto_ptr<DoorCustomData> data(new DoorCustomData);
+            std::unique_ptr<DoorCustomData> data(new DoorCustomData);
 
             data->mDoorState = 0;
             ptr.getRefData().setCustomData(data.release());

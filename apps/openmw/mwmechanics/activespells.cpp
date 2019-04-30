@@ -197,8 +197,14 @@ namespace MWMechanics
 
     void ActiveSpells::removeEffects(const std::string &id)
     {
-        mSpells.erase(Misc::StringUtils::lowerCase(id));
-        mSpellsChanged = true;
+        for (TContainer::iterator spell = mSpells.begin(); spell != mSpells.end(); ++spell)
+        {
+            if (spell->first == id)
+            {
+                spell->second.mEffects.clear();
+                mSpellsChanged = true;
+            }
+        }
     }
 
     void ActiveSpells::visitEffectSources(EffectSourceVisitor &visitor) const
@@ -222,10 +228,23 @@ namespace MWMechanics
         }
     }
 
-    void ActiveSpells::purgeAll(float chance)
+    void ActiveSpells::purgeAll(float chance, bool spellOnly)
     {
         for (TContainer::iterator it = mSpells.begin(); it != mSpells.end(); )
         {
+            const std::string spellId = it->first;
+
+            // if spellOnly is true, dispell only spells. Leave potions, enchanted items etc.
+            if (spellOnly)
+            {
+                const ESM::Spell* spell = MWBase::Environment::get().getWorld()->getStore().get<ESM::Spell>().search(spellId);
+                if (!spell || spell->mData.mType != ESM::Spell::ST_Spell)
+                {
+                    ++it;
+                    continue;
+                }
+            }
+
             if (Misc::Rng::roll0to99() < chance)
                 mSpells.erase(it++);
             else

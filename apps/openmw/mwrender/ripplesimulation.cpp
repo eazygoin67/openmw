@@ -26,13 +26,13 @@
 
 namespace
 {
-    void createWaterRippleStateSet(Resource::ResourceSystem* resourceSystem, const Fallback::Map* fallback, osg::Node* node)
+    void createWaterRippleStateSet(Resource::ResourceSystem* resourceSystem,osg::Node* node)
     {
-        int rippleFrameCount = fallback->getFallbackInt("Water_RippleFrameCount");
+        int rippleFrameCount = Fallback::Map::getInt("Water_RippleFrameCount");
         if (rippleFrameCount <= 0)
             return;
 
-        std::string tex = fallback->getFallbackString("Water_RippleTexture");
+        const std::string& tex = Fallback::Map::getString("Water_RippleTexture");
 
         std::vector<osg::ref_ptr<osg::Texture2D> > textures;
         for (int i=0; i<rippleFrameCount; ++i)
@@ -47,7 +47,7 @@ namespace
         }
 
         osg::ref_ptr<NifOsg::FlipController> controller (new NifOsg::FlipController(0, 0.3f/rippleFrameCount, textures));
-        controller->setSource(boost::shared_ptr<SceneUtil::ControllerSource>(new SceneUtil::FrameTimeSource));
+        controller->setSource(std::shared_ptr<SceneUtil::ControllerSource>(new SceneUtil::FrameTimeSource));
         node->addUpdateCallback(controller);
 
         osg::ref_ptr<osg::StateSet> stateset (new osg::StateSet);
@@ -81,7 +81,7 @@ namespace
 namespace MWRender
 {
 
-RippleSimulation::RippleSimulation(osg::Group *parent, Resource::ResourceSystem* resourceSystem, const Fallback::Map* fallback)
+RippleSimulation::RippleSimulation(osg::Group *parent, Resource::ResourceSystem* resourceSystem)
     : mParent(parent)
 {
     mParticleSystem = new osgParticle::ParticleSystem;
@@ -94,8 +94,8 @@ RippleSimulation::RippleSimulation(osg::Group *parent, Resource::ResourceSystem*
     particleTemplate.setSizeRange(osgParticle::rangef(15, 180));
     particleTemplate.setColorRange(osgParticle::rangev4(osg::Vec4f(1,1,1,0.7), osg::Vec4f(1,1,1,0.7)));
     particleTemplate.setAlphaRange(osgParticle::rangef(1.f, 0.f));
-    particleTemplate.setAngularVelocity(osg::Vec3f(0,0,fallback->getFallbackFloat("Water_RippleRotSpeed")));
-    particleTemplate.setLifeTime(fallback->getFallbackFloat("Water_RippleLifetime"));
+    particleTemplate.setAngularVelocity(osg::Vec3f(0,0,Fallback::Map::getFloat("Water_RippleRotSpeed")));
+    particleTemplate.setLifeTime(Fallback::Map::getFloat("Water_RippleLifetime"));
 
     osg::ref_ptr<osgParticle::ParticleSystemUpdater> updater (new osgParticle::ParticleSystemUpdater);
     updater->addParticleSystem(mParticleSystem);
@@ -105,7 +105,7 @@ RippleSimulation::RippleSimulation(osg::Group *parent, Resource::ResourceSystem*
     mParticleNode->addChild(mParticleSystem);
     mParticleNode->setNodeMask(Mask_Effect);
 
-    createWaterRippleStateSet(resourceSystem, fallback, mParticleNode);
+    createWaterRippleStateSet(resourceSystem, mParticleNode);
 
     mParent->addChild(mParticleNode);
 }
@@ -118,21 +118,22 @@ RippleSimulation::~RippleSimulation()
 void RippleSimulation::update(float dt)
 {
     const MWBase::World* world = MWBase::Environment::get().getWorld();
-    for (std::vector<Emitter>::iterator it=mEmitters.begin(); it !=mEmitters.end(); ++it)
+    for (Emitter& emitter : mEmitters)
     {
-        if (it->mPtr == MWBase::Environment::get().getWorld ()->getPlayerPtr())
+        MWWorld::ConstPtr& ptr = emitter.mPtr;
+        if (ptr == MWBase::Environment::get().getWorld ()->getPlayerPtr())
         {
             // fetch a new ptr (to handle cell change etc)
             // for non-player actors this is done in updateObjectCell
-            it->mPtr = MWBase::Environment::get().getWorld ()->getPlayerPtr();
+            ptr = MWBase::Environment::get().getWorld ()->getPlayerPtr();
         }
 
-        osg::Vec3f currentPos (it->mPtr.getRefData().getPosition().asVec3());
+        osg::Vec3f currentPos (ptr.getRefData().getPosition().asVec3());
 
-        bool shouldEmit = ( world->isUnderwater (it->mPtr.getCell(), it->mPtr.getRefData().getPosition().asVec3()) && !world->isSubmerged(it->mPtr) ) || world->isWalkingOnWater(it->mPtr);
-        if ( shouldEmit && (currentPos - it->mLastEmitPosition).length() > 10 )
+        bool shouldEmit = (world->isUnderwater(ptr.getCell(), currentPos) && !world->isSubmerged(ptr)) || world->isWalkingOnWater(ptr);
+        if (shouldEmit && (currentPos - emitter.mLastEmitPosition).length() > 10)
         {
-            it->mLastEmitPosition = currentPos;
+            emitter.mLastEmitPosition = currentPos;
 
             currentPos.z() = mParticleNode->getPosition().z();
 
@@ -196,7 +197,7 @@ void RippleSimulation::emitRipple(const osg::Vec3f &pos)
 {
     if (std::abs(pos.z() - mParticleNode->getPosition().z()) < 20)
     {
-        osgParticle::Particle* p = mParticleSystem->createParticle(NULL);
+        osgParticle::Particle* p = mParticleSystem->createParticle(nullptr);
         p->setPosition(osg::Vec3f(pos.x(), pos.y(), 0.f));
         p->setAngle(osg::Vec3f(0,0, Misc::Rng::rollProbability() * osg::PI * 2 - osg::PI));
     }

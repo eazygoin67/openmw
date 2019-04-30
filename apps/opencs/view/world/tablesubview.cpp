@@ -69,6 +69,9 @@ CSVWorld::TableSubView::TableSubView (const CSMWorld::UniversalId& id, CSMDoc::D
         connect (this, SIGNAL(cloneRequest(const std::string&, const CSMWorld::UniversalId::Type)),
                 mBottom, SLOT(cloneRequest(const std::string&, const CSMWorld::UniversalId::Type)));
 
+        connect (mTable, SIGNAL(touchRequest(const std::vector<CSMWorld::UniversalId>&)),
+            mBottom, SLOT(touchRequest(const std::vector<CSMWorld::UniversalId>&)));
+
         connect (mTable, SIGNAL(extendedDeleteConfigRequest(const std::vector<std::string> &)),
             mBottom, SLOT(extendedDeleteConfigRequest(const std::vector<std::string> &)));
         connect (mTable, SIGNAL(extendedRevertConfigRequest(const std::vector<std::string> &)),
@@ -78,8 +81,8 @@ CSVWorld::TableSubView::TableSubView (const CSMWorld::UniversalId& id, CSMDoc::D
         mTable, SLOT (requestFocus (const std::string&)));
 
     connect (mFilterBox,
-        SIGNAL (recordFilterChanged (boost::shared_ptr<CSMFilter::Node>)),
-        mTable, SLOT (recordFilterChanged (boost::shared_ptr<CSMFilter::Node>)));
+        SIGNAL (recordFilterChanged (std::shared_ptr<CSMFilter::Node>)),
+        mTable, SLOT (recordFilterChanged (std::shared_ptr<CSMFilter::Node>)));
 
     connect(mFilterBox, SIGNAL(recordDropped(std::vector<CSMWorld::UniversalId>&, Qt::DropAction)),
         this, SLOT(createFilterRequest(std::vector<CSMWorld::UniversalId>&, Qt::DropAction)));

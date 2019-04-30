@@ -3,8 +3,6 @@
 
 #include "aipackage.hpp"
 
-#include <boost/shared_ptr.hpp>
-
 #include "../mwworld/cellstore.hpp" // for Doors
 
 #include "../mwbase/world.hpp"
@@ -25,7 +23,72 @@ namespace MWMechanics
 {
     class Action;
 
-    struct AiCombatStorage;
+    /// \brief This class holds the variables AiCombat needs which are deleted if the package becomes inactive.
+    struct AiCombatStorage : AiTemporaryBase
+    {
+        float mAttackCooldown;
+        float mTimerReact;
+        float mTimerCombatMove;
+        bool mReadyToAttack;
+        bool mAttack;
+        float mAttackRange;
+        bool mCombatMove;
+        osg::Vec3f mLastTargetPos;
+        const MWWorld::CellStore* mCell;
+        std::shared_ptr<Action> mCurrentAction;
+        float mActionCooldown;
+        float mStrength;
+        bool mForceNoShortcut;
+        ESM::Position mShortcutFailPos;
+        MWMechanics::Movement mMovement;
+
+        enum FleeState
+        {
+            FleeState_None,
+            FleeState_Idle,
+            FleeState_RunBlindly,
+            FleeState_RunToDestination
+        };
+        FleeState mFleeState;
+        bool mLOS;
+        float mUpdateLOSTimer;
+        float mFleeBlindRunTimer;
+        ESM::Pathgrid::Point mFleeDest;
+
+        AiCombatStorage():
+        mAttackCooldown(0.0f),
+        mTimerReact(AI_REACTION_TIME),
+        mTimerCombatMove(0.0f),
+        mReadyToAttack(false),
+        mAttack(false),
+        mAttackRange(0.0f),
+        mCombatMove(false),
+        mLastTargetPos(0,0,0),
+        mCell(nullptr),
+        mCurrentAction(),
+        mActionCooldown(0.0f),
+        mStrength(),
+        mForceNoShortcut(false),
+        mShortcutFailPos(),
+        mMovement(),
+        mFleeState(FleeState_None),
+        mLOS(false),
+        mUpdateLOSTimer(0.0f),
+        mFleeBlindRunTimer(0.0f)
+        {}
+
+        void startCombatMove(bool isDistantCombat, float distToTarget, float rangeAttack, const MWWorld::Ptr& actor, const MWWorld::Ptr& target);
+        void updateCombatMove(float duration);
+        void stopCombatMove();
+        void startAttackIfReady(const MWWorld::Ptr& actor, CharacterController& characterController,
+            const ESM::Weapon* weapon, bool distantCombat);
+        void updateAttack(CharacterController& characterController);
+        void stopAttack();
+
+        void startFleeing();
+        void stopFleeing();
+        bool isFleeing();
+    };
 
     /// \brief Causes the actor to fight another actor
     class AiCombat : public AiPackage
@@ -56,10 +119,8 @@ namespace MWMechanics
             virtual bool shouldCancelPreviousAi() const { return false; }
 
         private:
-
-            int mTargetActorId;
-
-            void attack(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage, CharacterController& characterController);
+            /// Returns true if combat should end
+            bool attack(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage, CharacterController& characterController);
 
             void updateLOS(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration, AiCombatStorage& storage);
 
@@ -68,7 +129,7 @@ namespace MWMechanics
             /// Transfer desired movement (from AiCombatStorage) to Actor
             void updateActorsMovement(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage);
             void rotateActorOnAxis(const MWWorld::Ptr& actor, int axis, 
-                MWMechanics::Movement& actorMovementSettings, MWMechanics::Movement& desiredMovement);
+                MWMechanics::Movement& actorMovementSettings, AiCombatStorage& storage);
     };
     
     

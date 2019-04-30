@@ -2,8 +2,6 @@
 
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__OpenBSD__)
 
-#include <cstdlib>
-#include <cstring>
 #include <pwd.h>
 #include <unistd.h>
 #include <boost/filesystem/fstream.hpp>
@@ -16,15 +14,15 @@ namespace
     boost::filesystem::path getUserHome()
     {
         const char* dir = getenv("HOME");
-        if (dir == NULL)
+        if (dir == nullptr)
         {
             struct passwd* pwd = getpwuid(getuid());
-            if (pwd != NULL)
+            if (pwd != nullptr)
             {
                 dir = pwd->pw_dir;
             }
         }
-        if (dir == NULL)
+        if (dir == nullptr)
             return boost::filesystem::path();
         else
             return boost::filesystem::path(dir);

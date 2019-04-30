@@ -1,10 +1,7 @@
-#include "physicssystem.hpp"
-
-#include <stdexcept>
+﻿#include "physicssystem.hpp"
 
 #include <osg/Group>
 
-#include <BulletCollision/CollisionShapes/btHeightfieldTerrainShape.h>
 #include <BulletCollision/CollisionShapes/btConeShape.h>
 #include <BulletCollision/CollisionShapes/btSphereShape.h>
 #include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
@@ -12,7 +9,6 @@
 #include <BulletCollision/CollisionDispatch/btCollisionObject.h>
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 #include <BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h>
-#include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 #include <BulletCollision/BroadphaseCollision/btDbvtBroadphase.h>
 
 #include <LinearMath/btQuickprof.h>
@@ -20,10 +16,12 @@
 #include <components/nifbullet/bulletnifloader.hpp>
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/bulletshapemanager.hpp>
-
+#include <components/debug/debuglog.hpp>
 #include <components/esm/loadgmst.hpp>
+#include <components/misc/constants.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
 #include <components/sceneutil/unrefqueue.hpp>
+#include <components/misc/convert.hpp>
 
 #include <components/nifosg/particle.hpp> // FindRecIndexVisitor
 
@@ -39,45 +37,59 @@
 
 #include "../mwrender/bulletdebugdraw.hpp"
 
-#include "../mwbase/world.hpp"
-#include "../mwbase/environment.hpp"
-
 #include "../mwworld/class.hpp"
 
 #include "collisiontype.hpp"
 #include "actor.hpp"
-#include "convert.hpp"
 #include "trace.h"
+#include "object.hpp"
+#include "heightfield.hpp"
 
 namespace MWPhysics
 {
 
-    static const float sMaxSlope = 49.0f;
-    static const float sStepSizeUp = 34.0f;
     static const float sStepSizeDown = 62.0f;
+    static const float sMinStep = 10.f;
+    static const float sGroundOffset = 1.0f;
 
     // Arbitrary number. To prevent infinite loops. They shouldn't happen but it's good to be prepared.
     static const int sMaxIterations = 8;
 
-    // FIXME: move to a separate file
-    class MovementSolver
+    static bool isActor(const btCollisionObject *obj)
+    {
+        assert(obj);
+        return obj->getBroadphaseHandle()->m_collisionFilterGroup == CollisionType_Actor;
+    }
+
+    template <class Vec3>
+    static bool isWalkableSlope(const Vec3 &normal)
+    {
+        static const float sMaxSlopeCos = std::cos(osg::DegreesToRadians(sMaxSlope));
+        return (normal.z() > sMaxSlopeCos);
+    }
+
+    static bool canStepDown(const ActorTracer &stepper)
+    {
+        return stepper.mHitObject && isWalkableSlope(stepper.mPlaneNormal) && !isActor(stepper.mHitObject);
+    }
+
+    class Stepper
     {
     private:
-        static float getSlope(osg::Vec3f normal)
-        {
-            normal.normalize();
-            return osg::RadiansToDegrees(std::acos(normal * osg::Vec3f(0.f, 0.f, 1.f)));
-        }
+        const btCollisionWorld *mColWorld;
+        const btCollisionObject *mColObj;
 
-        enum StepMoveResult
-        {
-            Result_Blocked, // unable to move over obstacle
-            Result_MaxSlope, // unable to end movement on this slope
-            Result_Success
-        };
+        ActorTracer mTracer, mUpStepper, mDownStepper;
+        bool mHaveMoved;
 
-        static StepMoveResult stepMove(const btCollisionObject *colobj, osg::Vec3f &position,
-                             const osg::Vec3f &toMove, float &remainingTime, const btCollisionWorld* collisionWorld)
+    public:
+        Stepper(const btCollisionWorld *colWorld, const btCollisionObject *colObj)
+            : mColWorld(colWorld)
+            , mColObj(colObj)
+            , mHaveMoved(true)
+        {}
+
+        bool step(osg::Vec3f &position, const osg::Vec3f &toMove, float &remainingTime)
         {
             /*
              * Slide up an incline or set of stairs.  Should be called only after a
@@ -123,12 +135,14 @@ namespace MWPhysics
              *          +--+                         +--------
              *    ==============================================
              */
-            ActorTracer tracer, stepper;
-
-            stepper.doTrace(colobj, position, position+osg::Vec3f(0.0f,0.0f,sStepSizeUp), collisionWorld);
-            if(stepper.mFraction < std::numeric_limits<float>::epsilon())
-                return Result_Blocked; // didn't even move the smallest representable amount
-                              // (TODO: shouldn't this be larger? Why bother with such a small amount?)
+            if (mHaveMoved)
+            {
+                mHaveMoved = false;
+                mUpStepper.doTrace(mColObj, position, position+osg::Vec3f(0.0f,0.0f,sStepSizeUp), mColWorld);
+                if(mUpStepper.mFraction < std::numeric_limits<float>::epsilon())
+                    return false; // didn't even move the smallest representable amount
+                                  // (TODO: shouldn't this be larger? Why bother with such a small amount?)
+            }
 
             /*
              * Try moving from the elevated position using tracer.
@@ -143,9 +157,10 @@ namespace MWPhysics
              *          +--+
              *    ==============================================
              */
-            tracer.doTrace(colobj, stepper.mEndPos, stepper.mEndPos + toMove, collisionWorld);
-            if(tracer.mFraction < std::numeric_limits<float>::epsilon())
-                return Result_Blocked; // didn't even move the smallest representable amount
+            osg::Vec3f tracerPos = mUpStepper.mEndPos;
+            mTracer.doTrace(mColObj, tracerPos, tracerPos + toMove, mColWorld);
+            if(mTracer.mFraction < std::numeric_limits<float>::epsilon())
+                return false; // didn't even move the smallest representable amount
 
             /*
              * Try moving back down sStepSizeDown using stepper.
@@ -162,26 +177,40 @@ namespace MWPhysics
              *          +--+            +--+
              *    ==============================================
              */
-            stepper.doTrace(colobj, tracer.mEndPos, tracer.mEndPos-osg::Vec3f(0.0f,0.0f,sStepSizeDown), collisionWorld);
-            if (getSlope(stepper.mPlaneNormal) > sMaxSlope)
-                return Result_MaxSlope;
-            if(stepper.mFraction < 1.0f)
+            mDownStepper.doTrace(mColObj, mTracer.mEndPos, mTracer.mEndPos-osg::Vec3f(0.0f,0.0f,sStepSizeDown), mColWorld);
+            if (!canStepDown(mDownStepper))
             {
-                // don't allow stepping up other actors
-                if (stepper.mHitObject->getBroadphaseHandle()->m_collisionFilterGroup == CollisionType_Actor)
-                    return Result_Blocked;
+                // Try again with increased step length
+                if (mTracer.mFraction < 1.0f || toMove.length2() > sMinStep*sMinStep)
+                    return false;
+
+                osg::Vec3f direction = toMove;
+                direction.normalize();
+                mTracer.doTrace(mColObj, tracerPos, tracerPos + direction*sMinStep, mColWorld);
+                if (mTracer.mFraction < 0.001f)
+                    return false;
+
+                mDownStepper.doTrace(mColObj, mTracer.mEndPos, mTracer.mEndPos-osg::Vec3f(0.0f,0.0f,sStepSizeDown), mColWorld);
+                if (!canStepDown(mDownStepper))
+                    return false;
+            }
+            if (mDownStepper.mFraction < 1.0f)
+            {
                 // only step down onto semi-horizontal surfaces. don't step down onto the side of a house or a wall.
                 // TODO: stepper.mPlaneNormal does not appear to be reliable - needs more testing
                 // NOTE: caller's variables 'position' & 'remainingTime' are modified here
-                position = stepper.mEndPos;
-                remainingTime *= (1.0f-tracer.mFraction); // remaining time is proportional to remaining distance
-                return Result_Success;
+                position = mDownStepper.mEndPos;
+                remainingTime *= (1.0f-mTracer.mFraction); // remaining time is proportional to remaining distance
+                mHaveMoved = true;
+                return true;
             }
-
-            return Result_Blocked;
+            return false;
         }
+    };
 
-
+    class MovementSolver
+    {
+    private:
         ///Project a vector u on another vector v
         static inline osg::Vec3f project(const osg::Vec3f& u, const osg::Vec3f &v)
         {
@@ -195,20 +224,13 @@ namespace MWPhysics
             return direction - project(direction, planeNormal);
         }
 
-        static inline osg::Vec3f reflect(const osg::Vec3& velocity, const osg::Vec3f& normal)
-        {
-            return velocity - (normal * (normal * velocity)) * 2;
-            //                                  ^ dot product
-        }
-
-
     public:
-        static osg::Vec3f traceDown(const MWWorld::Ptr &ptr, Actor* actor, btCollisionWorld* collisionWorld, float maxHeight)
+        static osg::Vec3f traceDown(const MWWorld::Ptr &ptr, const osg::Vec3f& position, Actor* actor, btCollisionWorld* collisionWorld, float maxHeight)
         {
-            osg::Vec3f position(ptr.getRefData().getPosition().asVec3());
+            osg::Vec3f offset = actor->getCollisionObjectPosition() - ptr.getRefData().getPosition().asVec3();
 
             ActorTracer tracer;
-            tracer.findGround(actor, position, position-osg::Vec3f(0,0,maxHeight), collisionWorld);
+            tracer.findGround(actor, position + offset, position + offset - osg::Vec3f(0,0,maxHeight), collisionWorld);
             if(tracer.mFraction >= 1.0f)
             {
                 actor->setOnGround(false);
@@ -216,10 +238,12 @@ namespace MWPhysics
             }
             else
             {
+                actor->setOnGround(true);
+
                 // Check if we actually found a valid spawn point (use an infinitely thin ray this time).
                 // Required for some broken door destinations in Morrowind.esm, where the spawn point
                 // intersects with other geometry if the actor's base is taken into account
-                btVector3 from = toBullet(position);
+                btVector3 from = Misc::Convert::toBullet(position);
                 btVector3 to = from - btVector3(0,0,maxHeight);
 
                 btCollisionWorld::ClosestRayResultCallback resultCallback1(from, to);
@@ -229,16 +253,18 @@ namespace MWPhysics
                 collisionWorld->rayTest(from, to, resultCallback1);
 
                 if (resultCallback1.hasHit() &&
-                        ( (toOsg(resultCallback1.m_hitPointWorld) - tracer.mEndPos).length() > 35
-                        || getSlope(tracer.mPlaneNormal) > sMaxSlope))
+                        ( (Misc::Convert::toOsg(resultCallback1.m_hitPointWorld) - (tracer.mEndPos-offset)).length2() > 35*35
+                        || !isWalkableSlope(tracer.mPlaneNormal)))
                 {
-                    actor->setOnGround(getSlope(toOsg(resultCallback1.m_hitNormalWorld)) <= sMaxSlope);
-                    return toOsg(resultCallback1.m_hitPointWorld) + osg::Vec3f(0.f, 0.f, 1.f);
+                    actor->setOnSlope(!isWalkableSlope(resultCallback1.m_hitNormalWorld));
+                    return Misc::Convert::toOsg(resultCallback1.m_hitPointWorld) + osg::Vec3f(0.f, 0.f, sGroundOffset);
+                }
+                else
+                {
+                    actor->setOnSlope(!isWalkableSlope(tracer.mPlaneNormal));
                 }
 
-                actor->setOnGround(getSlope(tracer.mPlaneNormal) <= sMaxSlope);
-
-                return tracer.mEndPos;
+                return tracer.mEndPos-offset + osg::Vec3f(0.f, 0.f, sGroundOffset);
             }
         }
 
@@ -272,10 +298,11 @@ namespace MWPhysics
             position.z() += halfExtents.z();
 
             static const float fSwimHeightScale = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>()
-                    .find("fSwimHeightScale")->getFloat();
+                    .find("fSwimHeightScale")->mValue.getFloat();
             float swimlevel = waterlevel + halfExtents.z() - (physicActor->getRenderingHalfExtents().z() * 2 * fSwimHeightScale);
 
             ActorTracer tracer;
+
             osg::Vec3f inertia = physicActor->getInertialForce();
             osg::Vec3f velocity;
 
@@ -288,12 +315,11 @@ namespace MWPhysics
             {
                 velocity = (osg::Quat(refpos.rot[2], osg::Vec3f(0, 0, -1))) * movement;
 
-                if (velocity.z() > 0.f && physicActor->getOnGround())
+                if ((velocity.z() > 0.f && physicActor->getOnGround() && !physicActor->getOnSlope())
+                 || (velocity.z() > 0.f && velocity.z() + inertia.z() <= -velocity.z() && physicActor->getOnSlope()))
                     inertia = velocity;
-                else if(!physicActor->getOnGround())
-                {
-                    velocity = velocity + physicActor->getInertialForce();
-                }
+                else if (!physicActor->getOnGround() || physicActor->getOnSlope())
+                    velocity = velocity + inertia;
             }
 
             // dead actors underwater will float to the surface, if the CharacterController tells us to do so
@@ -308,12 +334,12 @@ namespace MWPhysics
                 osg::Vec3f stormDirection = MWBase::Environment::get().getWorld()->getStormDirection();
                 float angleDegrees = osg::RadiansToDegrees(std::acos(stormDirection * velocity / (stormDirection.length() * velocity.length())));
                 static const float fStromWalkMult = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>()
-                        .find("fStromWalkMult")->getFloat();
+                        .find("fStromWalkMult")->mValue.getFloat();
                 velocity *= 1.f-(fStromWalkMult * (angleDegrees/180.f));
             }
 
+            Stepper stepper(collisionWorld, colobj);
             osg::Vec3f origVelocity = velocity;
-
             osg::Vec3f newPosition = position;
             /*
              * A loop to find newPosition using tracer, if successful different from the starting position.
@@ -326,16 +352,12 @@ namespace MWPhysics
                 osg::Vec3f nextpos = newPosition + velocity * remainingTime;
 
                 // If not able to fly, don't allow to swim up into the air
-                if(newPosition.z() < swimlevel &&
-                   !isFlying &&  // can't fly
+                if(!isFlying &&                   // can't fly
                    nextpos.z() > swimlevel &&     // but about to go above water
-                   newPosition.z() <= swimlevel)
+                   newPosition.z() < swimlevel)
                 {
                     const osg::Vec3f down(0,0,-1);
-                    float movelen = velocity.normalize();
-                    osg::Vec3f reflectdir = reflect(velocity, down);
-                    reflectdir.normalize();
-                    velocity = slide(reflectdir, down)*movelen;
+                    velocity = slide(velocity, down);
                     // NOTE: remainingTime is unchanged before the loop continues
                     continue; // velocity updated, calculate nextpos again
                 }
@@ -364,19 +386,25 @@ namespace MWPhysics
                     break;
                 }
 
-
-                osg::Vec3f oldPosition = newPosition;
-                // We hit something. Try to step up onto it. (NOTE: stepMove does not allow stepping over)
-                // NOTE: stepMove modifies newPosition if successful
-                const float minStep = 10.f;
-                StepMoveResult result = stepMove(colobj, newPosition, velocity*remainingTime, remainingTime, collisionWorld);
-                if (result == Result_MaxSlope && (velocity*remainingTime).length() < minStep) // to make sure the maximum stepping distance isn't framerate-dependent or movement-speed dependent
+                // We are touching something.
+                if (tracer.mFraction < 1E-9f)
                 {
-                    osg::Vec3f normalizedVelocity = velocity;
-                    normalizedVelocity.normalize();
-                    result = stepMove(colobj, newPosition, normalizedVelocity*minStep, remainingTime, collisionWorld);
+                    // Try to separate by backing off slighly to unstuck the solver
+                    osg::Vec3f backOff = (newPosition - tracer.mHitPoint) * 1E-2f;
+                    newPosition += backOff;
                 }
-                if(result == Result_Success)
+
+                // We hit something. Check if we can step up.
+                float hitHeight = tracer.mHitPoint.z() - tracer.mEndPos.z() + halfExtents.z();
+                osg::Vec3f oldPosition = newPosition;
+                bool result = false;
+                if (hitHeight < sStepSizeUp && !isActor(tracer.mHitObject))
+                {
+                    // Try to step up onto it.
+                    // NOTE: stepMove does not allow stepping over, modifies newPosition if successful
+                    result = stepper.step(newPosition, velocity*remainingTime, remainingTime);
+                }
+                if (result)
                 {
                     // don't let pure water creatures move out of water after stepMove
                     if (ptr.getClass().isPureWaterCreature(ptr)
@@ -386,34 +414,31 @@ namespace MWPhysics
                 else
                 {
                     // Can't move this way, try to find another spot along the plane
-                    osg::Vec3f direction = velocity;
-                    float movelen = direction.normalize();
-                    osg::Vec3f reflectdir = reflect(velocity, tracer.mPlaneNormal);
-                    reflectdir.normalize();
+                    osg::Vec3f newVelocity = slide(velocity, tracer.mPlaneNormal);
 
-                    osg::Vec3f newVelocity = slide(reflectdir, tracer.mPlaneNormal)*movelen;
+                    // Do not allow sliding upward if there is gravity.
+                    // Stepping will have taken care of that.
+                    if(!(newPosition.z() < swimlevel || isFlying))
+                        newVelocity.z() = std::min(newVelocity.z(), 0.0f);
+
                     if ((newVelocity-velocity).length2() < 0.01)
                         break;
-                    if ((velocity * origVelocity) <= 0.f)
+                    if ((newVelocity * origVelocity) <= 0.f)
                         break; // ^ dot product
 
                     velocity = newVelocity;
-
-                    // Do not allow sliding upward if there is gravity. Stepping will have taken
-                    // care of that.
-                    if(!(newPosition.z() < swimlevel || isFlying))
-                        velocity.z() = std::min(velocity.z(), 0.0f);
                 }
             }
 
             bool isOnGround = false;
+            bool isOnSlope = false;
             if (!(inertia.z() > 0.f) && !(newPosition.z() < swimlevel))
             {
                 osg::Vec3f from = newPosition;
                 osg::Vec3f to = newPosition - (physicActor->getOnGround() ?
-                             osg::Vec3f(0,0,sStepSizeDown+2.f) : osg::Vec3f(0,0,2.f));
+                             osg::Vec3f(0,0,sStepSizeDown + 2*sGroundOffset) : osg::Vec3f(0,0,2*sGroundOffset));
                 tracer.doTrace(colobj, from, to, collisionWorld);
-                if(tracer.mFraction < 1.0f && getSlope(tracer.mPlaneNormal) <= sMaxSlope
+                if(tracer.mFraction < 1.0f
                         && tracer.mHitObject->getBroadphaseHandle()->m_collisionFilterGroup != CollisionType_Actor)
                 {
                     const btCollisionObject* standingOn = tracer.mHitObject;
@@ -424,9 +449,11 @@ namespace MWPhysics
                     if (standingOn->getBroadphaseHandle()->m_collisionFilterGroup == CollisionType_Water)
                         physicActor->setWalkingOnWater(true);
                     if (!isFlying)
-                        newPosition.z() = tracer.mEndPos.z() + 1.0f;
+                        newPosition.z() = tracer.mEndPos.z() + sGroundOffset;
 
                     isOnGround = true;
+
+                    isOnSlope = !isWalkableSlope(tracer.mPlaneNormal);
                 }
                 else
                 {
@@ -450,11 +477,11 @@ namespace MWPhysics
                 }
             }
 
-            if(isOnGround || newPosition.z() < swimlevel || isFlying)
+            if((isOnGround && !isOnSlope) || newPosition.z() < swimlevel || isFlying)
                 physicActor->setInertialForce(osg::Vec3f(0.f, 0.f, 0.f));
             else
             {
-                inertia.z() += time * -627.2f;
+                inertia.z() -= time * Constants::GravityConst * Constants::UnitsPerMeter;
                 if (inertia.z() < 0)
                     inertia.z() *= slowFall;
                 if (slowFall < 1.f) {
@@ -464,6 +491,7 @@ namespace MWPhysics
                 physicActor->setInertialForce(inertia);
             }
             physicActor->setOnGround(isOnGround);
+            physicActor->setOnSlope(isOnSlope);
 
             newPosition.z() -= halfExtents.z(); // remove what was added at the beginning
             return newPosition;
@@ -473,181 +501,6 @@ namespace MWPhysics
 
     // ---------------------------------------------------------------
 
-    class HeightField
-    {
-    public:
-        HeightField(const float* heights, int x, int y, float triSize, float sqrtVerts)
-        {
-            // find the minimum and maximum heights (needed for bullet)
-            float minh = heights[0];
-            float maxh = heights[0];
-            for(int i = 1;i < sqrtVerts*sqrtVerts;++i)
-            {
-                float h = heights[i];
-                if(h > maxh) maxh = h;
-                if(h < minh) minh = h;
-            }
-
-            mShape = new btHeightfieldTerrainShape(
-                sqrtVerts, sqrtVerts, heights, 1,
-                minh, maxh, 2,
-                PHY_FLOAT, true
-            );
-            mShape->setUseDiamondSubdivision(true);
-            mShape->setLocalScaling(btVector3(triSize, triSize, 1));
-
-            btTransform transform(btQuaternion::getIdentity(),
-                                  btVector3((x+0.5f) * triSize * (sqrtVerts-1),
-                                            (y+0.5f) * triSize * (sqrtVerts-1),
-                                            (maxh+minh)*0.5f));
-
-            mCollisionObject = new btCollisionObject;
-            mCollisionObject->setCollisionShape(mShape);
-            mCollisionObject->setWorldTransform(transform);
-        }
-        ~HeightField()
-        {
-            delete mCollisionObject;
-            delete mShape;
-        }
-        btCollisionObject* getCollisionObject()
-        {
-            return mCollisionObject;
-        }
-
-    private:
-        btHeightfieldTerrainShape* mShape;
-        btCollisionObject* mCollisionObject;
-
-        void operator=(const HeightField&);
-        HeightField(const HeightField&);
-    };
-
-    // --------------------------------------------------------------
-
-    class Object : public PtrHolder
-    {
-    public:
-        Object(const MWWorld::Ptr& ptr, osg::ref_ptr<Resource::BulletShapeInstance> shapeInstance)
-            : mShapeInstance(shapeInstance)
-            , mSolid(true)
-        {
-            mPtr = ptr;
-
-            mCollisionObject.reset(new btCollisionObject);
-            mCollisionObject->setCollisionShape(shapeInstance->getCollisionShape());
-
-            mCollisionObject->setUserPointer(static_cast<PtrHolder*>(this));
-
-            setScale(ptr.getCellRef().getScale());
-            setRotation(toBullet(ptr.getRefData().getBaseNode()->getAttitude()));
-            const float* pos = ptr.getRefData().getPosition().pos;
-            setOrigin(btVector3(pos[0], pos[1], pos[2]));
-        }
-
-        const Resource::BulletShapeInstance* getShapeInstance() const
-        {
-            return mShapeInstance.get();
-        }
-
-        void setScale(float scale)
-        {
-            mShapeInstance->getCollisionShape()->setLocalScaling(btVector3(scale,scale,scale));
-        }
-
-        void setRotation(const btQuaternion& quat)
-        {
-            mCollisionObject->getWorldTransform().setRotation(quat);
-        }
-
-        void setOrigin(const btVector3& vec)
-        {
-            mCollisionObject->getWorldTransform().setOrigin(vec);
-        }
-
-        btCollisionObject* getCollisionObject()
-        {
-            return mCollisionObject.get();
-        }
-
-        const btCollisionObject* getCollisionObject() const
-        {
-            return mCollisionObject.get();
-        }
-
-        /// Return solid flag. Not used by the object itself, true by default.
-        bool isSolid() const
-        {
-            return mSolid;
-        }
-
-        void setSolid(bool solid)
-        {
-            mSolid = solid;
-        }
-
-        bool isAnimated() const
-        {
-            return !mShapeInstance->mAnimatedShapes.empty();
-        }
-
-        void animateCollisionShapes(btCollisionWorld* collisionWorld)
-        {
-            if (mShapeInstance->mAnimatedShapes.empty())
-                return;
-
-            assert (mShapeInstance->getCollisionShape()->isCompound());
-
-            btCompoundShape* compound = static_cast<btCompoundShape*>(mShapeInstance->getCollisionShape());
-
-            for (std::map<int, int>::const_iterator it = mShapeInstance->mAnimatedShapes.begin(); it != mShapeInstance->mAnimatedShapes.end(); ++it)
-            {
-                int recIndex = it->first;
-                int shapeIndex = it->second;
-
-                std::map<int, osg::NodePath>::iterator nodePathFound = mRecIndexToNodePath.find(recIndex);
-                if (nodePathFound == mRecIndexToNodePath.end())
-                {
-                    NifOsg::FindGroupByRecIndex visitor(recIndex);
-                    mPtr.getRefData().getBaseNode()->accept(visitor);
-                    if (!visitor.mFound)
-                    {
-                        std::cerr << "animateCollisionShapes: Can't find node " << recIndex << std::endl;
-                        return;
-                    }
-                    osg::NodePath nodePath = visitor.mFoundPath;
-                    nodePath.erase(nodePath.begin());
-                    nodePathFound = mRecIndexToNodePath.insert(std::make_pair(recIndex, nodePath)).first;
-                }
-
-                osg::NodePath& nodePath = nodePathFound->second;
-                osg::Matrixf matrix = osg::computeLocalToWorld(nodePath);
-                osg::Vec3f scale = matrix.getScale();
-                matrix.orthoNormalize(matrix);
-
-                btTransform transform;
-                transform.setOrigin(toBullet(matrix.getTrans()) * compound->getLocalScaling());
-                for (int i=0; i<3; ++i)
-                    for (int j=0; j<3; ++j)
-                        transform.getBasis()[i][j] = matrix(j,i); // NB column/row major difference
-
-                if (compound->getLocalScaling() * toBullet(scale) != compound->getChildShape(shapeIndex)->getLocalScaling())
-                    compound->getChildShape(shapeIndex)->setLocalScaling(compound->getLocalScaling() * toBullet(scale));
-                if (!(transform == compound->getChildTransform(shapeIndex)))
-                    compound->updateChildTransform(shapeIndex, transform);
-            }
-
-            collisionWorld->updateSingleAabb(mCollisionObject.get());
-        }
-
-    private:
-        std::auto_ptr<btCollisionObject> mCollisionObject;
-        osg::ref_ptr<Resource::BulletShapeInstance> mShapeInstance;
-        std::map<int, osg::NodePath> mRecIndexToNodePath;
-        bool mSolid;
-    };
-
-    // ---------------------------------------------------------------
 
     PhysicsSystem::PhysicsSystem(Resource::ResourceSystem* resourceSystem, osg::ref_ptr<osg::Group> parentNode)
         : mShapeManager(new Resource::BulletShapeManager(resourceSystem->getVFS(), resourceSystem->getSceneManager(), resourceSystem->getNifFileManager()))
@@ -657,6 +510,7 @@ namespace MWPhysics
         , mWaterHeight(0)
         , mWaterEnabled(false)
         , mParentNode(parentNode)
+        , mPhysicsDt(1.f / 60.f)
     {
         mResourceSystem->addResourceManager(mShapeManager.get());
 
@@ -669,6 +523,18 @@ namespace MWPhysics
         // Don't update AABBs of all objects every frame. Most objects in MW are static, so we don't need this.
         // Should a "static" object ever be moved, we have to update its AABB manually using DynamicsWorld::updateSingleAabb.
         mCollisionWorld->setForceUpdateAllAabbs(false);
+
+        // Check if a user decided to override a physics system FPS
+        const char* env = getenv("OPENMW_PHYSICS_FPS");
+        if (env)
+        {
+            float physFramerate = std::atof(env);
+            if (physFramerate > 0)
+            {
+                mPhysicsDt = 1.f / physFramerate;
+                Log(Debug::Warning) << "Warning: using custom physics framerate (" << physFramerate << " FPS).";
+            }
+        }
     }
 
     PhysicsSystem::~PhysicsSystem()
@@ -758,6 +624,7 @@ namespace MWPhysics
     class DeepestNotMeContactTestResultCallback : public btCollisionWorld::ContactResultCallback
     {
         const btCollisionObject* mMe;
+        const std::vector<const btCollisionObject*> mTargets;
 
         // Store the real origin, since the shape's origin is its center
         btVector3 mOrigin;
@@ -767,8 +634,8 @@ namespace MWPhysics
         btVector3 mContactPoint;
         btScalar mLeastDistSqr;
 
-        DeepestNotMeContactTestResultCallback(const btCollisionObject* me, const btVector3 &origin)
-          : mMe(me), mOrigin(origin), mObject(NULL), mContactPoint(0,0,0),
+        DeepestNotMeContactTestResultCallback(const btCollisionObject* me, const std::vector<const btCollisionObject*>& targets, const btVector3 &origin)
+          : mMe(me), mTargets(targets), mOrigin(origin), mObject(nullptr), mContactPoint(0,0,0),
             mLeastDistSqr(std::numeric_limits<float>::max())
         { }
 
@@ -779,6 +646,16 @@ namespace MWPhysics
             const btCollisionObject* collisionObject = col1Wrap->m_collisionObject;
             if (collisionObject != mMe)
             {
+                if (!mTargets.empty())
+                {
+                    if ((std::find(mTargets.begin(), mTargets.end(), collisionObject) == mTargets.end()))
+                    {
+                        PtrHolder* holder = static_cast<PtrHolder*>(collisionObject->getUserPointer());
+                        if (holder && !holder->getPtr().isEmpty() && holder->getPtr().getClass().isActor())
+                            return 0.f;
+                    }
+                }
+
                 btScalar distsqr = mOrigin.distance2(cp.getPositionWorldOnA());
                 if(!mObject || distsqr < mLeastDistSqr)
                 {
@@ -795,12 +672,22 @@ namespace MWPhysics
     std::pair<MWWorld::Ptr, osg::Vec3f> PhysicsSystem::getHitContact(const MWWorld::ConstPtr& actor,
                                                                      const osg::Vec3f &origin,
                                                                      const osg::Quat &orient,
-                                                                      float queryDistance)
+                                                                     float queryDistance, std::vector<MWWorld::Ptr> targets)
     {
+        // First of all, try to hit where you aim to
+        int hitmask = CollisionType_World | CollisionType_Door | CollisionType_HeightMap | CollisionType_Actor;
+        RayResult result = castRay(origin, origin + (orient * osg::Vec3f(0.0f, queryDistance, 0.0f)), actor, targets, hitmask, CollisionType_Actor);
+
+        if (result.mHit)
+        {
+            return std::make_pair(result.mHitObject, result.mHitPos);
+        }
+
+        // Use cone shape as fallback
         const MWWorld::Store<ESM::GameSetting> &store = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
 
-        btConeShape shape (osg::DegreesToRadians(store.find("fCombatAngleXY")->getFloat()/2.0f), queryDistance);
-        shape.setLocalScaling(btVector3(1, 1, osg::DegreesToRadians(store.find("fCombatAngleZ")->getFloat()/2.0f) /
+        btConeShape shape (osg::DegreesToRadians(store.find("fCombatAngleXY")->mValue.getFloat()/2.0f), queryDistance);
+        shape.setLocalScaling(btVector3(1, 1, osg::DegreesToRadians(store.find("fCombatAngleZ")->mValue.getFloat()/2.0f) /
                                               shape.getRadius()));
 
         // The shape origin is its center, so we have to move it forward by half the length. The
@@ -809,14 +696,26 @@ namespace MWPhysics
 
         btCollisionObject object;
         object.setCollisionShape(&shape);
-        object.setWorldTransform(btTransform(toBullet(orient), toBullet(center)));
+        object.setWorldTransform(btTransform(Misc::Convert::toBullet(orient), Misc::Convert::toBullet(center)));
 
-        const btCollisionObject* me = NULL;
+        const btCollisionObject* me = nullptr;
+        std::vector<const btCollisionObject*> targetCollisionObjects;
+
         const Actor* physactor = getActor(actor);
         if (physactor)
             me = physactor->getCollisionObject();
 
-        DeepestNotMeContactTestResultCallback resultCallback(me, toBullet(origin));
+        if (!targets.empty())
+        {
+            for (MWWorld::Ptr& target : targets)
+            {
+                const Actor* targetActor = getActor(target);
+                if (targetActor)
+                    targetCollisionObjects.push_back(targetActor->getCollisionObject());
+            }
+        }
+
+        DeepestNotMeContactTestResultCallback resultCallback(me, targetCollisionObjects, Misc::Convert::toBullet(origin));
         resultCallback.m_collisionFilterGroup = CollisionType_Actor;
         resultCallback.m_collisionFilterMask = CollisionType_World | CollisionType_Door | CollisionType_HeightMap | CollisionType_Actor;
         mCollisionWorld->contactTest(&object, resultCallback);
@@ -825,14 +724,14 @@ namespace MWPhysics
         {
             PtrHolder* holder = static_cast<PtrHolder*>(resultCallback.mObject->getUserPointer());
             if (holder)
-                return std::make_pair(holder->getPtr(), toOsg(resultCallback.mContactPoint));
+                return std::make_pair(holder->getPtr(), Misc::Convert::toOsg(resultCallback.mContactPoint));
         }
         return std::make_pair(MWWorld::Ptr(), osg::Vec3f());
     }
 
     float PhysicsSystem::getHitDistance(const osg::Vec3f &point, const MWWorld::ConstPtr &target) const
     {
-        btCollisionObject* targetCollisionObj = NULL;
+        btCollisionObject* targetCollisionObj = nullptr;
         const Actor* actor = getActor(target);
         if (actor)
             targetCollisionObj = actor->getCollisionObject();
@@ -841,7 +740,7 @@ namespace MWPhysics
 
         btTransform rayFrom;
         rayFrom.setIdentity();
-        rayFrom.setOrigin(toBullet(point));
+        rayFrom.setOrigin(Misc::Convert::toBullet(point));
 
         // target the collision object's world origin, this should be the center of the collision object
         btTransform rayTo;
@@ -857,34 +756,46 @@ namespace MWPhysics
             return 0.f;
         }
         else
-            return (point - toOsg(cb.m_hitPointWorld)).length();
+            return (point - Misc::Convert::toOsg(cb.m_hitPointWorld)).length();
     }
 
     class ClosestNotMeRayResultCallback : public btCollisionWorld::ClosestRayResultCallback
     {
     public:
-        ClosestNotMeRayResultCallback(const btCollisionObject* me, const btVector3& from, const btVector3& to)
+        ClosestNotMeRayResultCallback(const btCollisionObject* me, const std::vector<const btCollisionObject*>& targets, const btVector3& from, const btVector3& to)
             : btCollisionWorld::ClosestRayResultCallback(from, to)
-            , mMe(me)
+            , mMe(me), mTargets(targets)
         {
         }
 
-        virtual btScalar addSingleResult(btCollisionWorld::LocalRayResult& rayResult,bool normalInWorldSpace)
+        virtual btScalar addSingleResult(btCollisionWorld::LocalRayResult& rayResult, bool normalInWorldSpace)
         {
             if (rayResult.m_collisionObject == mMe)
                 return 1.f;
+            if (!mTargets.empty())
+            {
+                if ((std::find(mTargets.begin(), mTargets.end(), rayResult.m_collisionObject) == mTargets.end()))
+                {
+                    PtrHolder* holder = static_cast<PtrHolder*>(rayResult.m_collisionObject->getUserPointer());
+                    if (holder && !holder->getPtr().isEmpty() && holder->getPtr().getClass().isActor())
+                        return 1.f;
+                }
+            }
             return btCollisionWorld::ClosestRayResultCallback::addSingleResult(rayResult, normalInWorldSpace);
         }
     private:
         const btCollisionObject* mMe;
+        const std::vector<const btCollisionObject*> mTargets;
     };
 
-    PhysicsSystem::RayResult PhysicsSystem::castRay(const osg::Vec3f &from, const osg::Vec3f &to, MWWorld::ConstPtr ignore, int mask, int group) const
+    PhysicsSystem::RayResult PhysicsSystem::castRay(const osg::Vec3f &from, const osg::Vec3f &to, const MWWorld::ConstPtr& ignore, std::vector<MWWorld::Ptr> targets, int mask, int group) const
     {
-        btVector3 btFrom = toBullet(from);
-        btVector3 btTo = toBullet(to);
+        btVector3 btFrom = Misc::Convert::toBullet(from);
+        btVector3 btTo = Misc::Convert::toBullet(to);
 
-        const btCollisionObject* me = NULL;
+        const btCollisionObject* me = nullptr;
+        std::vector<const btCollisionObject*> targetCollisionObjects;
+
         if (!ignore.isEmpty())
         {
             const Actor* actor = getActor(ignore);
@@ -898,7 +809,17 @@ namespace MWPhysics
             }
         }
 
-        ClosestNotMeRayResultCallback resultCallback(me, btFrom, btTo);
+        if (!targets.empty())
+        {
+            for (MWWorld::Ptr& target : targets)
+            {
+                const Actor* actor = getActor(target);
+                if (actor)
+                    targetCollisionObjects.push_back(actor->getCollisionObject());
+            }
+        }
+
+        ClosestNotMeRayResultCallback resultCallback(me, targetCollisionObjects, btFrom, btTo);
         resultCallback.m_collisionFilterGroup = group;
         resultCallback.m_collisionFilterMask = mask;
 
@@ -908,8 +829,8 @@ namespace MWPhysics
         result.mHit = resultCallback.hasHit();
         if (resultCallback.hasHit())
         {
-            result.mHitPos = toOsg(resultCallback.m_hitPointWorld);
-            result.mHitNormal = toOsg(resultCallback.m_hitNormalWorld);
+            result.mHitPos = Misc::Convert::toOsg(resultCallback.m_hitPointWorld);
+            result.mHitNormal = Misc::Convert::toOsg(resultCallback.m_hitNormalWorld);
             if (PtrHolder* ptrHolder = static_cast<PtrHolder*>(resultCallback.m_collisionObject->getUserPointer()))
                 result.mHitObject = ptrHolder->getPtr();
         }
@@ -918,15 +839,15 @@ namespace MWPhysics
 
     PhysicsSystem::RayResult PhysicsSystem::castSphere(const osg::Vec3f &from, const osg::Vec3f &to, float radius)
     {
-        btCollisionWorld::ClosestConvexResultCallback callback(toBullet(from), toBullet(to));
+        btCollisionWorld::ClosestConvexResultCallback callback(Misc::Convert::toBullet(from), Misc::Convert::toBullet(to));
         callback.m_collisionFilterGroup = 0xff;
         callback.m_collisionFilterMask = CollisionType_World|CollisionType_HeightMap|CollisionType_Door;
 
         btSphereShape shape(radius);
         const btQuaternion btrot = btQuaternion::getIdentity();
 
-        btTransform from_ (btrot, toBullet(from));
-        btTransform to_ (btrot, toBullet(to));
+        btTransform from_ (btrot, Misc::Convert::toBullet(from));
+        btTransform to_ (btrot, Misc::Convert::toBullet(to));
 
         mCollisionWorld->convexSweepTest(&shape, from_, to_, callback);
 
@@ -934,8 +855,8 @@ namespace MWPhysics
         result.mHit = callback.hasHit();
         if (result.mHit)
         {
-            result.mHitPos = toOsg(callback.m_hitPointWorld);
-            result.mHitNormal = toOsg(callback.m_hitNormalWorld);
+            result.mHitPos = Misc::Convert::toOsg(callback.m_hitPointWorld);
+            result.mHitNormal = Misc::Convert::toOsg(callback.m_hitNormalWorld);
         }
         return result;
     }
@@ -951,46 +872,15 @@ namespace MWPhysics
         osg::Vec3f pos1 (physactor1->getCollisionObjectPosition() + osg::Vec3f(0,0,physactor1->getHalfExtents().z() * 0.9)); // eye level
         osg::Vec3f pos2 (physactor2->getCollisionObjectPosition() + osg::Vec3f(0,0,physactor2->getHalfExtents().z() * 0.9));
 
-        RayResult result = castRay(pos1, pos2, MWWorld::Ptr(), CollisionType_World|CollisionType_HeightMap|CollisionType_Door);
+        RayResult result = castRay(pos1, pos2, MWWorld::ConstPtr(), std::vector<MWWorld::Ptr>(), CollisionType_World|CollisionType_HeightMap|CollisionType_Door);
 
         return !result.mHit;
     }
 
-    // physactor->getOnGround() is not a reliable indicator of whether the actor
-    // is on the ground (defaults to false, which means code blocks such as
-    // CharacterController::update() may falsely detect "falling").
-    //
-    // Also, collisions can move z position slightly off zero, giving a false
-    // indication. In order to reduce false detection of jumping, small distance
-    // below the actor is detected and ignored. A value of 1.5 is used here, but
-    // something larger may be more suitable.  This change should resolve Bug#1271.
-    //
-    // TODO: There might be better places to update PhysicActor::mOnGround.
     bool PhysicsSystem::isOnGround(const MWWorld::Ptr &actor)
     {
         Actor* physactor = getActor(actor);
-        if(!physactor)
-            return false;
-        if(physactor->getOnGround())
-            return true;
-        else
-        {
-            osg::Vec3f pos(actor.getRefData().getPosition().asVec3());
-
-            ActorTracer tracer;
-            // a small distance above collision object is considered "on ground"
-            tracer.findGround(physactor,
-                              pos,
-                              pos - osg::Vec3f(0, 0, 1.5f), // trace a small amount down
-                              mCollisionWorld);
-            if(tracer.mFraction < 1.0f) // collision, must be close to something below
-            {
-                physactor->setOnGround(true);
-                return true;
-            }
-            else
-                return false;
-        }
+        return physactor && physactor->getOnGround();
     }
 
     bool PhysicsSystem::canMoveToWaterSurface(const MWWorld::ConstPtr &actor, const float waterlevel)
@@ -1012,6 +902,14 @@ namespace MWPhysics
         const Actor* physactor = getActor(actor);
         if (physactor)
             return physactor->getHalfExtents();
+        else
+            return osg::Vec3f();
+    }
+
+    osg::Vec3f PhysicsSystem::getOriginalHalfExtents(const MWWorld::ConstPtr &actor) const
+    {
+        if (const Actor* physactor = getActor(actor))
+            return physactor->getOriginalHalfExtents();
         else
             return osg::Vec3f();
     }
@@ -1062,7 +960,7 @@ namespace MWPhysics
 
     std::vector<MWWorld::Ptr> PhysicsSystem::getCollisions(const MWWorld::ConstPtr &ptr, int collisionGroup, int collisionMask) const
     {
-        btCollisionObject* me = NULL;
+        btCollisionObject* me = nullptr;
 
         ObjectMap::const_iterator found = mObjects.find(ptr);
         if (found != mObjects.end())
@@ -1077,18 +975,18 @@ namespace MWPhysics
         return resultCallback.mResult;
     }
 
-    osg::Vec3f PhysicsSystem::traceDown(const MWWorld::Ptr &ptr, float maxHeight)
+    osg::Vec3f PhysicsSystem::traceDown(const MWWorld::Ptr &ptr, const osg::Vec3f& position, float maxHeight)
     {
         ActorMap::iterator found = mActors.find(ptr);
         if (found ==  mActors.end())
             return ptr.getRefData().getPosition().asVec3();
         else
-            return MovementSolver::traceDown(ptr, found->second, mCollisionWorld, maxHeight);
+            return MovementSolver::traceDown(ptr, position, found->second, mCollisionWorld, maxHeight);
     }
 
-    void PhysicsSystem::addHeightField (const float* heights, int x, int y, float triSize, float sqrtVerts)
+    void PhysicsSystem::addHeightField (const float* heights, int x, int y, float triSize, float sqrtVerts, float minH, float maxH, const osg::Object* holdObject)
     {
-        HeightField *heightfield = new HeightField(heights, x, y, triSize, sqrtVerts);
+        HeightField *heightfield = new HeightField(heights, x, y, triSize, sqrtVerts, minH, maxH, holdObject);
         mHeightFields[std::make_pair(x,y)] = heightfield;
 
         mCollisionWorld->addCollisionObject(heightfield->getCollisionObject(), CollisionType_HeightMap,
@@ -1104,6 +1002,14 @@ namespace MWPhysics
             delete heightfield->second;
             mHeightFields.erase(heightfield);
         }
+    }
+
+    const HeightField* PhysicsSystem::getHeightField(int x, int y) const
+    {
+        const auto heightField = mHeightFields.find(std::make_pair(x, y));
+        if (heightField == mHeightFields.end())
+            return nullptr;
+        return heightField->second;
     }
 
     void PhysicsSystem::addObject (const MWWorld::Ptr& ptr, const std::string& mesh, int collisionType)
@@ -1190,7 +1096,7 @@ namespace MWPhysics
         ActorMap::iterator found = mActors.find(ptr);
         if (found != mActors.end())
             return found->second;
-        return NULL;
+        return nullptr;
     }
 
     const Actor *PhysicsSystem::getActor(const MWWorld::ConstPtr &ptr) const
@@ -1198,7 +1104,7 @@ namespace MWPhysics
         ActorMap::const_iterator found = mActors.find(ptr);
         if (found != mActors.end())
             return found->second;
-        return NULL;
+        return nullptr;
     }
 
     const Object* PhysicsSystem::getObject(const MWWorld::ConstPtr &ptr) const
@@ -1206,7 +1112,7 @@ namespace MWPhysics
         ObjectMap::const_iterator found = mObjects.find(ptr);
         if (found != mObjects.end())
             return found->second;
-        return NULL;
+        return nullptr;
     }
 
     void PhysicsSystem::updateScale(const MWWorld::Ptr &ptr)
@@ -1233,15 +1139,18 @@ namespace MWPhysics
         ObjectMap::iterator found = mObjects.find(ptr);
         if (found != mObjects.end())
         {
-            found->second->setRotation(toBullet(ptr.getRefData().getBaseNode()->getAttitude()));
+            found->second->setRotation(Misc::Convert::toBullet(ptr.getRefData().getBaseNode()->getAttitude()));
             mCollisionWorld->updateSingleAabb(found->second->getCollisionObject());
             return;
         }
         ActorMap::iterator foundActor = mActors.find(ptr);
         if (foundActor != mActors.end())
         {
-            foundActor->second->updateRotation();
-            mCollisionWorld->updateSingleAabb(foundActor->second->getCollisionObject());
+            if (!foundActor->second->isRotationallyInvariant())
+            {
+                foundActor->second->updateRotation();
+                mCollisionWorld->updateSingleAabb(foundActor->second->getCollisionObject());
+            }
             return;
         }
     }
@@ -1251,7 +1160,7 @@ namespace MWPhysics
         ObjectMap::iterator found = mObjects.find(ptr);
         if (found != mObjects.end())
         {
-            found->second->setOrigin(toBullet(ptr.getRefData().getPosition().asVec3()));
+            found->second->setOrigin(Misc::Convert::toBullet(ptr.getRefData().getPosition().asVec3()));
             mCollisionWorld->updateSingleAabb(found->second->getCollisionObject());
             return;
         }
@@ -1269,6 +1178,16 @@ namespace MWPhysics
         if (!shape)
             return;
 
+        // Try to get shape from basic model as fallback for creatures
+        if (!ptr.getClass().isNpc() && shape->mCollisionBoxHalfExtents.length2() == 0)
+        {
+            const std::string fallbackModel = ptr.getClass().getModel(ptr);
+            if (fallbackModel != mesh)
+            {
+                shape = mShapeManager->getShape(fallbackModel);
+            }
+        }
+
         Actor* actor = new Actor(ptr, shape, mCollisionWorld);
         mActors.insert(std::make_pair(ptr, actor));
     }
@@ -1281,6 +1200,7 @@ namespace MWPhysics
             bool cmode = found->second->getCollisionMode();
             cmode = !cmode;
             found->second->enableCollisionMode(cmode);
+            found->second->enableCollisionBody(cmode);
             return cmode;
         }
 
@@ -1313,13 +1233,12 @@ namespace MWPhysics
         mMovementResults.clear();
 
         mTimeAccum += dt;
-        const float physicsDt = 1.f/60.0f;
 
         const int maxAllowedSteps = 20;
-        int numSteps = mTimeAccum / (physicsDt);
+        int numSteps = mTimeAccum / (mPhysicsDt);
         numSteps = std::min(numSteps, maxAllowedSteps);
 
-        mTimeAccum -= numSteps * physicsDt;
+        mTimeAccum -= numSteps * mPhysicsDt;
 
         if (numSteps)
         {
@@ -1327,6 +1246,7 @@ namespace MWPhysics
             mStandingCollisions.clear();
         }
 
+        const MWWorld::Ptr player = MWMechanics::getPlayer();
         const MWBase::World *world = MWBase::Environment::get().getWorld();
         PtrVelocityList::iterator iter = mMovementQueue.begin();
         for(;iter != mMovementQueue.end();++iter)
@@ -1360,23 +1280,35 @@ namespace MWPhysics
             // Slow fall reduces fall speed by a factor of (effect magnitude / 200)
             float slowFall = 1.f - std::max(0.f, std::min(1.f, effects.get(ESM::MagicEffect::SlowFall).getMagnitude() * 0.005f));
 
+            bool flying = world->isFlying(iter->first);
+            bool swimming = world->isSwimming(iter->first);
+
+            bool wasOnGround = physicActor->getOnGround();
             osg::Vec3f position = physicActor->getPosition();
             float oldHeight = position.z();
+            bool positionChanged = false;
             for (int i=0; i<numSteps; ++i)
             {
-                position = MovementSolver::move(position, physicActor->getPtr(), physicActor, iter->second, physicsDt,
-                                                world->isFlying(iter->first),
-                                                waterlevel, slowFall, mCollisionWorld, mStandingCollisions);
-                physicActor->setPosition(position);
+                position = MovementSolver::move(position, physicActor->getPtr(), physicActor, iter->second, mPhysicsDt,
+                                                flying, waterlevel, slowFall, mCollisionWorld, mStandingCollisions);
+                if (position != physicActor->getPosition())
+                    positionChanged = true;
+                physicActor->setPosition(position); // always set even if unchanged to make sure interpolation is correct
             }
+            if (positionChanged)
+                mCollisionWorld->updateSingleAabb(physicActor->getCollisionObject());
 
-            float interpolationFactor = mTimeAccum / physicsDt;
+            float interpolationFactor = mTimeAccum / mPhysicsDt;
             osg::Vec3f interpolated = position * interpolationFactor + physicActor->getPreviousPosition() * (1.f - interpolationFactor);
 
             float heightDiff = position.z() - oldHeight;
 
-            if (heightDiff < 0)
-                iter->first.getClass().getCreatureStats(iter->first).addToFallHeight(-heightDiff);
+            MWMechanics::CreatureStats& stats = iter->first.getClass().getCreatureStats(iter->first);
+            bool isStillOnGround = (numSteps > 0 && wasOnGround && physicActor->getOnGround());
+            if (isStillOnGround || flying || swimming || slowFall < 1)
+                stats.land(iter->first == player && (flying || swimming));
+            else if (heightDiff < 0)
+                stats.addToFallHeight(-heightDiff);
 
             mMovementResults.push_back(std::make_pair(iter->first, interpolated));
         }
@@ -1388,13 +1320,20 @@ namespace MWPhysics
 
     void PhysicsSystem::stepSimulation(float dt)
     {
-        for (std::set<Object*>::iterator it = mAnimatedObjects.begin(); it != mAnimatedObjects.end(); ++it)
-            (*it)->animateCollisionShapes(mCollisionWorld);
+        for (Object* animatedObject :  mAnimatedObjects)
+            animatedObject->animateCollisionShapes(mCollisionWorld);
 
 #ifndef BT_NO_PROFILE
         CProfileManager::Reset();
         CProfileManager::Increment_Frame_Counter();
 #endif
+    }
+
+    void PhysicsSystem::updateAnimatedCollisionShape(const MWWorld::Ptr& object)
+    {
+        ObjectMap::iterator found = mObjects.find(object);
+        if (found != mObjects.end())
+            found->second->animateCollisionShapes(mCollisionWorld);
     }
 
     void PhysicsSystem::debugDraw()

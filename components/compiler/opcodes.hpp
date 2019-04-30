@@ -150,6 +150,7 @@ namespace Compiler
     namespace Dialogue
     {
         const int opcodeJournal = 0x2000133;
+        const int opcodeJournalExplicit = 0x200030b;
         const int opcodeSetJournalIndex = 0x2000134;
         const int opcodeGetJournalIndex = 0x2000135;
         const int opcodeAddTopic = 0x200013a;
@@ -200,6 +201,7 @@ namespace Compiler
     {
         const int opcodeXBox = 0x200000c;
         const int opcodeOnActivate = 0x200000d;
+        const int opcodeOnActivateExplicit = 0x2000306;
         const int opcodeActivate = 0x2000075;
         const int opcodeActivateExplicit = 0x2000244;
         const int opcodeLock = 0x20004;
@@ -292,6 +294,12 @@ namespace Compiler
         const int opcodeRemoveFromLevCreature = 0x20002fc;
         const int opcodeAddToLevItem = 0x20002fd;
         const int opcodeRemoveFromLevItem = 0x20002fe;
+        const int opcodeShowSceneGraph = 0x2002f;
+        const int opcodeShowSceneGraphExplicit = 0x20030;
+        const int opcodeToggleBorders = 0x2000307;
+        const int opcodeToggleNavMesh = 0x2000308;
+        const int opcodeToggleActorsPaths = 0x2000309;
+        const int opcodeSetNavMeshNumberToRender = 0x200030a;
     }
 
     namespace Sky
@@ -500,7 +508,6 @@ namespace Compiler
         const int opcodeMoveWorldExplicit = 0x2000209;
         const int opcodeResetActors = 0x20002f4;
         const int opcodeFixme = 0x2000302;
-        const int opcodeFixmeExplicit = 0x2000303;
     }
 
     namespace User

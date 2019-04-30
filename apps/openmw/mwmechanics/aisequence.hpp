@@ -3,6 +3,8 @@
 
 #include <list>
 
+#include "aistate.hpp"
+
 #include <components/esm/loadnpc.hpp>
 
 namespace MWWorld
@@ -47,6 +49,7 @@ namespace MWMechanics
 
             /// The type of AI package that ran last
             int mLastAiPackage;
+            AiState mAiState;
 
         public:
             ///Default constructor
@@ -64,7 +67,7 @@ namespace MWMechanics
             std::list<AiPackage*>::const_iterator begin() const;
             std::list<AiPackage*>::const_iterator end() const;
 
-            std::list<AiPackage*>::const_iterator erase (std::list<AiPackage*>::const_iterator package);
+            void erase (std::list<AiPackage*>::const_iterator package);
 
             /// Returns currently executing AiPackage type
             /** \see enum AiPackage::TypeId **/
@@ -79,8 +82,17 @@ namespace MWMechanics
             /// Return true and assign target if combat package is currently active, return false otherwise
             bool getCombatTarget (MWWorld::Ptr &targetActor) const;
 
+            /// Return true and assign targets for all combat packages, or return false if there are no combat packages
+            bool getCombatTargets(std::vector<MWWorld::Ptr> &targetActors) const;
+
             /// Is there any combat package?
             bool isInCombat () const;
+
+            /// Are we in combat with any other actor, who's also engaging us?
+            bool isEngagedWithActor () const;
+
+            /// Does this AI sequence have the given package type?
+            bool hasPackage(int typeId) const;
 
             /// Are we in combat with this particular actor?
             bool isInCombat (const MWWorld::Ptr& actor) const;
@@ -98,10 +110,10 @@ namespace MWMechanics
             void stopPursuit();
 
             /// Execute current package, switching if needed.
-            void execute (const MWWorld::Ptr& actor, CharacterController& characterController, MWMechanics::AiState& state, float duration);
+            void execute (const MWWorld::Ptr& actor, CharacterController& characterController, float duration);
 
             /// Simulate the passing of time using the currently active AI package
-            void fastForward(const MWWorld::Ptr &actor, AiState &state);
+            void fastForward(const MWWorld::Ptr &actor);
 
             /// Remove all packages.
             void clear();
@@ -109,7 +121,7 @@ namespace MWMechanics
             ///< Add \a package to the front of the sequence
             /** Suspends current package
                 @param actor The actor that owns this AiSequence **/
-            void stack (const AiPackage& package, const MWWorld::Ptr& actor);
+            void stack (const AiPackage& package, const MWWorld::Ptr& actor, bool cancelOther=true);
 
             /// Return the current active package.
             /** If there is no active package, it will throw an exception **/

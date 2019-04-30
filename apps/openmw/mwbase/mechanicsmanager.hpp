@@ -7,6 +7,8 @@
 #include <set>
 #include <stdint.h>
 
+#include "../mwworld/ptr.hpp"
+
 namespace osg
 {
     class Vec3f;
@@ -88,7 +90,9 @@ namespace MWBase
             virtual void setPlayerClass (const ESM::Class& class_) = 0;
             ///< Set player class to custom class.
 
-            virtual void rest(bool sleep) = 0;
+            virtual void restoreDynamicStats(MWWorld::Ptr actor, double hours, bool sleep) = 0;
+
+            virtual void rest(double hours, bool sleep) = 0;
             ///< If the player is sleeping or waiting, this should be called every hour.
             /// @param sleep is the player sleeping or waiting?
 
@@ -138,7 +142,7 @@ namespace MWBase
             /// Utility to check if taking this item is illegal and calling commitCrime if so
             /// @param container The container the item is in; may be empty for an item in the world
             virtual void itemTaken (const MWWorld::Ptr& ptr, const MWWorld::Ptr& item, const MWWorld::Ptr& container,
-                                    int count) = 0;
+                                    int count, bool alarm = true) = 0;
             /// Utility to check if opening (i.e. unlocking) this object is illegal and calling commitCrime if so
             virtual void objectOpened (const MWWorld::Ptr& ptr, const MWWorld::Ptr& item) = 0;
             /// Attempt sleeping in a bed. If this is illegal, call commitCrime.
@@ -189,6 +193,9 @@ namespace MWBase
             virtual void getObjectsInRange (const osg::Vec3f& position, float radius, std::vector<MWWorld::Ptr>& objects) = 0;
             virtual void getActorsInRange(const osg::Vec3f &position, float radius, std::vector<MWWorld::Ptr> &objects) = 0;
 
+            /// Check if there are actors in selected range
+            virtual bool isAnyActorInRange(const osg::Vec3f &position, float radius) = 0;
+
             ///Returns the list of actors which are siding with the given actor in fights
             /**ie AiFollow or AiEscort is active and the target is the actor **/
             virtual std::list<MWWorld::Ptr> getActorsSidingWith(const MWWorld::Ptr& actor) = 0;
@@ -220,7 +227,22 @@ namespace MWBase
             /// Resurrects the player if necessary
             virtual void keepPlayerAlive() = 0;
 
+            virtual bool isCastingSpell (const MWWorld::Ptr& ptr) const = 0;
             virtual bool isReadyToBlock (const MWWorld::Ptr& ptr) const = 0;
+            virtual bool isAttackingOrSpell(const MWWorld::Ptr &ptr) const = 0;
+
+            virtual void castSpell(const MWWorld::Ptr& ptr, const std::string spellId, bool manualSpell) = 0;
+
+            virtual void processChangedSettings (const std::set< std::pair<std::string, std::string> >& settings) = 0;
+
+            virtual float getActorsProcessingRange() const = 0;
+
+            virtual bool onOpen(const MWWorld::Ptr& ptr) = 0;
+            virtual void onClose(const MWWorld::Ptr& ptr) = 0;
+
+            /// Check if the target actor was detected by an observer
+            /// If the observer is a non-NPC, check all actors in AI processing distance as observers
+            virtual bool isActorDetected(const MWWorld::Ptr& actor, const MWWorld::Ptr& observer) = 0;
 
             virtual void confiscateStolenItems (const MWWorld::Ptr& player, const MWWorld::Ptr& targetContainer) = 0;
 
@@ -229,9 +251,10 @@ namespace MWBase
             virtual std::vector<std::pair<std::string, int> > getStolenItemOwners(const std::string& itemid) = 0;
 
             /// Has the player stolen this item from the given owner?
-            virtual bool isItemStolenFrom(const std::string& itemid, const std::string& ownerid) = 0;
-            
-            virtual bool isAllowedToUse (const MWWorld::Ptr& ptr, const MWWorld::CellRef& cellref, MWWorld::Ptr& victim) = 0;
+            virtual bool isItemStolenFrom(const std::string& itemid, const MWWorld::Ptr& ptr) = 0;
+
+            virtual bool isBoundItem(const MWWorld::Ptr& item) = 0;
+            virtual bool isAllowedToUse (const MWWorld::Ptr& ptr, const MWWorld::Ptr& target, MWWorld::Ptr& victim) = 0;
 
             /// Turn actor into werewolf or normal form.
             virtual void setWerewolf(const MWWorld::Ptr& actor, bool werewolf) = 0;
@@ -241,6 +264,11 @@ namespace MWBase
             virtual void applyWerewolfAcrobatics(const MWWorld::Ptr& actor) = 0;
 
             virtual void cleanupSummonedCreature(const MWWorld::Ptr& caster, int creatureActorId) = 0;
+
+            virtual void confiscateStolenItemToOwner(const MWWorld::Ptr &player, const MWWorld::Ptr &item, const MWWorld::Ptr& victim, int count) = 0;
+            virtual bool isAttackPreparing(const MWWorld::Ptr& ptr) = 0;
+            virtual bool isRunning(const MWWorld::Ptr& ptr) = 0;
+            virtual bool isSneaking(const MWWorld::Ptr& ptr) = 0;
     };
 }
 

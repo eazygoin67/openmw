@@ -17,6 +17,11 @@ CSVRender::PreviewWidget::PreviewWidget (CSMWorld::Data& data,
     connect (referenceables, SIGNAL (rowsAboutToBeRemoved (const QModelIndex&, int, int)),
         this, SLOT (referenceableAboutToBeRemoved (const QModelIndex&, int, int)));
 
+    connect (&mData, SIGNAL (assetTablesChanged ()),
+        this, SLOT (assetTablesChanged ()));
+
+    setExterior(false);
+
     if (!referenceable)
     {
         QAbstractItemModel *references =
@@ -118,4 +123,9 @@ void CSVRender::PreviewWidget::referenceAboutToBeRemoved (const QModelIndex& par
 
     if (index.row()>=start && index.row()<=end)
         emit closeRequest();
+}
+
+void CSVRender::PreviewWidget::assetTablesChanged ()
+{
+    mObject.reloadAssets();
 }

@@ -8,7 +8,7 @@
 
 namespace
 {
-    // See http://theory.stanford.edu/~amitp/GameProgramming/Heuristics.html
+    // See https://theory.stanford.edu/~amitp/GameProgramming/Heuristics.html
     //
     // One of the smallest cost in Seyda Neen is between points 77 & 78:
     // pt      x     y
@@ -49,15 +49,16 @@ namespace
 
 namespace MWMechanics
 {
-    PathgridGraph::PathgridGraph()
-        : mCell(NULL)
-        , mPathgrid(NULL)
+    PathgridGraph::PathgridGraph(const MWWorld::CellStore *cell)
+        : mCell(nullptr)
+        , mPathgrid(nullptr)
         , mIsExterior(0)
         , mGraph(0)
         , mIsGraphConstructed(false)
         , mSCCId(0)
         , mSCCIndex(0)
     {
+        load(cell);
     }
 
     /*
@@ -128,6 +129,11 @@ namespace MWMechanics
         buildConnectedPoints();
         mIsGraphConstructed = true;
         return true;
+    }
+
+    const ESM::Pathgrid *PathgridGraph::getPathgrid() const
+    {
+        return mPathgrid;
     }
 
     // v is the pathgrid point index (some call them vertices)
@@ -214,6 +220,16 @@ namespace MWMechanics
         return (mGraph[start].componentId == mGraph[end].componentId);
     }
 
+    void PathgridGraph::getNeighbouringPoints(const int index, ESM::Pathgrid::PointList &nodes) const
+    {
+        for(int i = 0; i < static_cast<int> (mGraph[index].edges.size()); i++)
+        {
+            int neighbourIndex = mGraph[index].edges[i].index;
+            if (neighbourIndex != index)
+                nodes.push_back(mPathgrid->mPoints[neighbourIndex]);
+        }
+    }
+
     /*
      * NOTE: Based on buildPath2(), please check git history if interested
      *       Should consider using a 3rd party library version (e.g. boost)
@@ -241,10 +257,9 @@ namespace MWMechanics
      *       pathgrid points form (currently they are converted to world
      *       coordinates).  Essentially trading speed w/ memory.
      */
-    std::list<ESM::Pathgrid::Point> PathgridGraph::aStarSearch(const int start,
-                                                               const int goal) const
+    std::deque<ESM::Pathgrid::Point> PathgridGraph::aStarSearch(const int start, const int goal) const
     {
-        std::list<ESM::Pathgrid::Point> path;
+        std::deque<ESM::Pathgrid::Point> path;
         if(!isPointConnected(start, goal))
         {
             return path; // there is no path, return an empty path

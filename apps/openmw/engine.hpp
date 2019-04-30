@@ -7,7 +7,7 @@
 #include <components/settings/settings.hpp>
 
 #include <osgViewer/Viewer>
-
+#include <osgViewer/ViewerEventHandlers>
 
 #include "mwbase/environment.hpp"
 
@@ -16,6 +16,11 @@
 namespace Resource
 {
     class ResourceSystem;
+}
+
+namespace SceneUtil
+{
+    class WorkQueue;
 }
 
 namespace VFS
@@ -66,8 +71,9 @@ namespace OMW
     class Engine
     {
             SDL_Window* mWindow;
-            std::auto_ptr<VFS::Manager> mVFS;
-            std::auto_ptr<Resource::ResourceSystem> mResourceSystem;
+            std::unique_ptr<VFS::Manager> mVFS;
+            std::unique_ptr<Resource::ResourceSystem> mResourceSystem;
+            osg::ref_ptr<SceneUtil::WorkQueue> mWorkQueue;
             MWBase::Environment mEnvironment;
             ToUTF8::FromType mEncoding;
             ToUTF8::Utf8Encoder* mEncoder;
@@ -76,16 +82,15 @@ namespace OMW
             boost::filesystem::path mResDir;
             osg::ref_ptr<osgViewer::Viewer> mViewer;
             osg::ref_ptr<osgViewer::ScreenCaptureHandler> mScreenCaptureHandler;
+            osgViewer::ScreenCaptureHandler::CaptureOperation *mScreenCaptureOperation;
             std::string mCellName;
             std::vector<std::string> mContentFiles;
-            bool mVerboseScripts;
             bool mSkipMenu;
             bool mUseSound;
             bool mCompileAll;
             bool mCompileAllDialogue;
             int mWarningsMode;
             std::string mFocusName;
-            std::map<std::string,std::string> mFallbackMap;
             bool mScriptConsoleMode;
             std::string mStartupScript;
             int mActivationDistanceOverride;
@@ -94,6 +99,7 @@ namespace OMW
             bool mGrab;
 
             bool mExportFonts;
+            unsigned int mRandomSeed;
 
             Compiler::Extensions mExtensions;
             Compiler::Context *mScriptContext;
@@ -113,7 +119,7 @@ namespace OMW
 
             void executeLocalScripts();
 
-            void frame (float dt);
+            bool frame (float dt);
 
             /// Load settings from various files, returns the path to the user settings file
             std::string loadSettings (Settings::Manager & settings);
@@ -143,7 +149,7 @@ namespace OMW
             /// Set resource dir
             void setResourceDir(const boost::filesystem::path& parResDir);
 
-            /// Set start cell name (only interiors for now)
+            /// Set start cell name
             void setCell(const std::string& cellName);
 
             /**
@@ -151,9 +157,6 @@ namespace OMW
              * @param file - filename (extension is required)
              */
             void addContentFile(const std::string& file);
-
-            /// Enable or disable verbose script output
-            void setScriptsVerbosity(bool scriptsVerbosity);
 
             /// Disable or enable all sounds
             void setSoundUsage(bool soundUsage);
@@ -178,8 +181,6 @@ namespace OMW
             /// Font encoding
             void setEncoding(const ToUTF8::FromType& encoding);
 
-            void setFallbackValues(std::map<std::string,std::string> map);
-
             /// Enable console-only script functionality
             void setScriptConsoleMode (bool enabled);
 
@@ -199,6 +200,8 @@ namespace OMW
 
             /// Set the save game file to load after initialising the engine.
             void setSaveGameFile(const std::string& savegame);
+
+            void setRandomSeed(unsigned int seed);
 
         private:
             Files::ConfigurationManager& mCfgMgr;

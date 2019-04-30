@@ -25,7 +25,6 @@
 #include "itemmodel.hpp"
 #include "draganddrop.hpp"
 
-#include "itemmodel.hpp"
 #include "itemwidget.hpp"
 
 namespace MWGui
@@ -68,23 +67,22 @@ namespace MWGui
 
 
     HUD::HUD(CustomMarkerCollection &customMarkers, DragAndDrop* dragAndDrop, MWRender::LocalMap* localMapRender)
-        : Layout("openmw_hud.layout")
+        : WindowBase("openmw_hud.layout")
         , LocalMapBase(customMarkers, localMapRender, Settings::Manager::getBool("local map hud fog of war", "Map"))
-        , mHealth(NULL)
-        , mMagicka(NULL)
-        , mStamina(NULL)
-        , mDrowning(NULL)
-        , mWeapImage(NULL)
-        , mSpellImage(NULL)
-        , mWeapStatus(NULL)
-        , mSpellStatus(NULL)
-        , mEffectBox(NULL)
-        , mMinimap(NULL)
-        , mCompass(NULL)
-        , mCrosshair(NULL)
-        , mCellNameBox(NULL)
-        , mDrowningFrame(NULL)
-        , mDrowningFlash(NULL)
+        , mHealth(nullptr)
+        , mMagicka(nullptr)
+        , mStamina(nullptr)
+        , mDrowning(nullptr)
+        , mWeapImage(nullptr)
+        , mSpellImage(nullptr)
+        , mWeapStatus(nullptr)
+        , mSpellStatus(nullptr)
+        , mEffectBox(nullptr)
+        , mMinimap(nullptr)
+        , mCrosshair(nullptr)
+        , mCellNameBox(nullptr)
+        , mDrowningFrame(nullptr)
+        , mDrowningFlash(nullptr)
         , mHealthManaStaminaBaseLeft(0)
         , mWeapBoxBaseLeft(0)
         , mSpellBoxBaseLeft(0)
@@ -159,7 +157,9 @@ namespace MWGui
 
         getWidget(mCrosshair, "Crosshair");
 
-        LocalMapBase::init(mMinimap, mCompass, Settings::Manager::getInt("local map hud widget size", "Map"), Settings::Manager::getInt("local map cell distance", "Map"));
+        int mapSize = std::max(1, Settings::Manager::getInt("local map hud widget size", "Map"));
+        int cellDistance = std::max(1, Settings::Manager::getInt("local map cell distance", "Map"));
+        LocalMapBase::init(mMinimap, mCompass, mapSize, cellDistance);
 
         mMainWidget->eventMouseButtonClick += MyGUI::newDelegate(this, &HUD::onWorldClicked);
         mMainWidget->eventMouseMove += MyGUI::newDelegate(this, &HUD::onWorldMouseOver);
@@ -179,29 +179,33 @@ namespace MWGui
 
     void HUD::setValue(const std::string& id, const MWMechanics::DynamicStat<float>& value)
     {
-        int current = std::max(0, static_cast<int>(value.getCurrent()));
+        int current = static_cast<int>(value.getCurrent());
         int modified = static_cast<int>(value.getModified());
 
+        // Fatigue can be negative
+        if (id != "FBar")
+            current = std::max(0, current);
+
         MyGUI::Widget* w;
-        std::string valStr = MyGUI::utility::toString(current) + "/" + MyGUI::utility::toString(modified);
+        std::string valStr = MyGUI::utility::toString(current) + " / " + MyGUI::utility::toString(modified);
         if (id == "HBar")
         {
-            mHealth->setProgressRange(modified);
-            mHealth->setProgressPosition(current);
+            mHealth->setProgressRange(std::max(0, modified));
+            mHealth->setProgressPosition(std::max(0, current));
             getWidget(w, "HealthFrame");
             w->setUserString("Caption_HealthDescription", "#{sHealthDesc}\n" + valStr);
         }
         else if (id == "MBar")
         {
-            mMagicka->setProgressRange (modified);
-            mMagicka->setProgressPosition (current);
+            mMagicka->setProgressRange(std::max(0, modified));
+            mMagicka->setProgressPosition(std::max(0, current));
             getWidget(w, "MagickaFrame");
             w->setUserString("Caption_HealthDescription", "#{sMagDesc}\n" + valStr);
         }
         else if (id == "FBar")
         {
-            mStamina->setProgressRange (modified);
-            mStamina->setProgressPosition (current);
+            mStamina->setProgressRange(std::max(0, modified));
+            mStamina->setProgressPosition(std::max(0, current));
             getWidget(w, "FatigueFrame");
             w->setUserString("Caption_HealthDescription", "#{sFatDesc}\n" + valStr);
         }
@@ -242,7 +246,7 @@ namespace MWGui
             float mouseY = cursorPosition.top / float(viewSize.height);
 
             WorldItemModel drop (mouseX, mouseY);
-            mDragAndDrop->drop(&drop, NULL);
+            mDragAndDrop->drop(&drop, nullptr);
 
             MWBase::Environment::get().getWindowManager()->changePointer("arrow");
         }
@@ -257,7 +261,7 @@ namespace MWGui
 
             if (mode == GM_Console)
                 MWBase::Environment::get().getWindowManager()->setConsoleSelectedObject(object);
-            else if ((mode == GM_Container) || (mode == GM_Inventory))
+            else //if ((mode == GM_Container) || (mode == GM_Inventory))
             {
                 // pick up object
                 if (!object.isEmpty())
@@ -367,6 +371,20 @@ namespace MWGui
 
         if (mIsDrowning)
             mDrowningFlashTheta += dt * osg::PI*2;
+
+        mSpellIcons->updateWidgets(mEffectBox, true);
+
+        if (mEnemyActorId != -1 && mEnemyHealth->getVisible())
+        {
+            updateEnemyHealthBar();
+        }
+
+        if (mIsDrowning)
+        {
+            float intensity = (cos(mDrowningFlashTheta) + 2.0f) / 3.0f;
+
+            mDrowningFlash->setAlpha(intensity);
+        }
     }
 
     void HUD::setSelectedSpell(const std::string& spellId, int successChancePercent)
@@ -398,8 +416,7 @@ namespace MWGui
         icon.insert(slashPos+1, "b_");
         icon = MWBase::Environment::get().getWindowManager()->correctIconPath(icon);
 
-        mSpellImage->setItem(MWWorld::Ptr());
-        mSpellImage->setIcon(icon);
+        mSpellImage->setSpellIcon(icon);
     }
 
     void HUD::setSelectedEnchantItem(const MWWorld::Ptr& item, int chargePercent)
@@ -417,7 +434,7 @@ namespace MWGui
         mSpellStatus->setProgressPosition(chargePercent);
 
         mSpellBox->setUserString("ToolTipType", "ItemPtr");
-        mSpellBox->setUserData(item);
+        mSpellBox->setUserData(MWWorld::Ptr(item));
 
         mSpellImage->setItem(item);
     }
@@ -435,7 +452,7 @@ namespace MWGui
 
         mWeapBox->clearUserStrings();
         mWeapBox->setUserString("ToolTipType", "ItemPtr");
-        mWeapBox->setUserData(item);
+        mWeapBox->setUserData(MWWorld::Ptr(item));
 
         mWeapStatus->setProgressRange(100);
         mWeapStatus->setProgressPosition(durabilityPercent);
@@ -592,32 +609,16 @@ namespace MWGui
         // Therefore any value < 1 should show as an empty health bar. We do the same in statswindow :)
         mEnemyHealth->setProgressPosition(static_cast<size_t>(stats.getHealth().getCurrent() / stats.getHealth().getModified() * 100));
 
-        static const float fNPCHealthBarFade = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fNPCHealthBarFade")->getFloat();
+        static const float fNPCHealthBarFade = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fNPCHealthBarFade")->mValue.getFloat();
         if (fNPCHealthBarFade > 0.f)
             mEnemyHealth->setAlpha(std::max(0.f, std::min(1.f, mEnemyHealthTimer/fNPCHealthBarFade)));
 
     }
 
-    void HUD::update()
-    {
-        mSpellIcons->updateWidgets(mEffectBox, true);
-
-        if (mEnemyActorId != -1 && mEnemyHealth->getVisible())
-        {
-            updateEnemyHealthBar();
-        }
-
-        if (mIsDrowning)
-        {
-            float intensity = (cos(mDrowningFlashTheta) + 1.0f) / 2.0f;
-            mDrowningFlash->setColour(MyGUI::Colour(intensity, 0, 0));
-        }
-    }
-
     void HUD::setEnemy(const MWWorld::Ptr &enemy)
     {
         mEnemyActorId = enemy.getClass().getCreatureStats(enemy).getActorId();
-        mEnemyHealthTimer = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fNPCHealthBarTime")->getFloat();
+        mEnemyHealthTimer = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fNPCHealthBarTime")->mValue.getFloat();
         if (!mEnemyHealth->getVisible())
             mWeaponSpellBox->setPosition(mWeaponSpellBox->getPosition() - MyGUI::IntPoint(0,20));
         mEnemyHealth->setVisible(true);
@@ -628,6 +629,13 @@ namespace MWGui
     {
         mEnemyActorId = -1;
         mEnemyHealthTimer = -1;
+    }
+
+    void HUD::clear()
+    {
+        unsetSelectedSpell();
+        unsetSelectedWeapon();
+        resetEnemy();
     }
 
     void HUD::customMarkerCreated(MyGUI::Widget *marker)

@@ -63,8 +63,6 @@ namespace CSVRender
 
         protected:
 
-            virtual void onActivate(){}
-
             void addShortcut(CSMPrefs::Shortcut* shortcut);
 
         private:
@@ -159,9 +157,12 @@ namespace CSVRender
 
             void update(double dt);
 
-        private:
+            /// \brief Flag controller to be re-initialized.
+            void reset();
 
-            void onActivate();
+            void setConstRoll(bool enable);
+
+        private:
 
             void initialize();
 
@@ -181,6 +182,8 @@ namespace CSVRender
 
             double mOrbitSpeed;
             double mOrbitSpeedMult;
+
+            bool mConstRoll;
 
         private slots:
 

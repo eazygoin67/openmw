@@ -1,17 +1,16 @@
 #include "cells.hpp"
 
-#include <iostream>
-
+#include <components/debug/debuglog.hpp>
 #include <components/esm/esmreader.hpp>
 #include <components/esm/esmwriter.hpp>
 #include <components/esm/defs.hpp>
 #include <components/esm/cellstate.hpp>
 #include <components/loadinglistener/loadinglistener.hpp>
+#include <components/settings/settings.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 
-#include "class.hpp"
 #include "esmstore.hpp"
 #include "containerstore.hpp"
 #include "cellstore.hpp"
@@ -88,7 +87,7 @@ void MWWorld::Cells::writeCell (ESM::ESMWriter& writer, CellStore& cell) const
 
 MWWorld::Cells::Cells (const MWWorld::ESMStore& store, std::vector<ESM::ESMReader>& reader)
 : mStore (store), mReader (reader),
-  mIdCache (40, std::pair<std::string, CellStore *> ("", (CellStore*)0)), /// \todo make cache size configurable
+  mIdCache (Settings::Manager::getInt("pointers cache size", "Cells"), std::pair<std::string, CellStore *> ("", (CellStore*)0)),
   mIdCacheIndex (0)
 {}
 
@@ -149,6 +148,19 @@ MWWorld::CellStore *MWWorld::Cells::getInterior (const std::string& name)
     }
 
     return &result->second;
+}
+
+void MWWorld::Cells::rest (double hours)
+{
+    for (auto &interior : mInteriors)
+    {
+        interior.second.rest(hours);
+    }
+
+    for (auto &exterior : mExteriors)
+    {
+        exterior.second.rest(hours);
+    }
 }
 
 MWWorld::CellStore *MWWorld::Cells::getCell (const ESM::CellId& id)
@@ -327,7 +339,7 @@ public:
         }
         catch (...)
         {
-            return NULL;
+            return nullptr;
         }
     }
 };
@@ -349,7 +361,7 @@ bool MWWorld::Cells::readRecord (ESM::ESMReader& reader, uint32_t type,
         catch (...)
         {
             // silently drop cells that don't exist anymore
-            std::cerr << "Dropping state for cell " << state.mId.mWorldspace << " (cell no longer exists)" << std::endl;
+            Log(Debug::Warning) << "Warning: Dropping state for cell " << state.mId.mWorldspace << " (cell no longer exists)";
             reader.skipRecord();
             return true;
         }

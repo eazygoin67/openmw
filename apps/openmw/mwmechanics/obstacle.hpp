@@ -10,19 +10,14 @@ namespace MWMechanics
 {
     struct Movement;
 
-    /// NOTE: determined empirically based on in-game behaviour
-    static const float MIN_DIST_TO_DOOR_SQUARED = 128*128;
-
     static const int NUM_EVADE_DIRECTIONS = 4;
 
     /// tests actor's proximity to a closed door by default
-    bool proximityToDoor(const MWWorld::Ptr& actor,
-                         float minSqr = MIN_DIST_TO_DOOR_SQUARED);
+    bool proximityToDoor(const MWWorld::Ptr& actor, float minDist);
 
     /// Returns door pointer within range. No guarantee is given as to which one
-    /** \return Pointer to the door, or NULL if none exists **/
-    MWWorld::Ptr getNearbyDoor(const MWWorld::Ptr& actor,
-                         float minSqr = MIN_DIST_TO_DOOR_SQUARED);
+    /** \return Pointer to the door, or empty pointer if none exists **/
+    const MWWorld::Ptr getNearbyDoor(const MWWorld::Ptr& actor, float minDist);
 
     class ObstacleCheck
     {
@@ -32,15 +27,13 @@ namespace MWMechanics
             // Clear the timers and set the state machine to default
             void clear();
 
-            bool isNormalState() const;
             bool isEvading() const;
 
-            // Returns true if there is an obstacle and an evasive action
-            // should be taken
-            bool check(const MWWorld::Ptr& actor, float duration, float scaleMinimumDistance = 1.0f);
+            // Updates internal state, call each frame for moving actor
+            void update(const MWWorld::Ptr& actor, float duration);
 
             // change direction to try to fix "stuck" actor
-            void takeEvasiveAction(MWMechanics::Movement& actorMovement);
+            void takeEvasiveAction(MWMechanics::Movement& actorMovement) const;
 
         private:
 

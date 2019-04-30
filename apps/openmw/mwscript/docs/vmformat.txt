@@ -60,7 +60,9 @@ op 0x2002b: PCJoinFaction, explicit reference
 op 0x2002c: MenuTest
 op 0x2002d: BetaComment
 op 0x2002e: BetaComment, explicit reference
-opcodes 0x2002d-0x3ffff unused
+op 0x2002f: ShowSceneGraph
+op 0x20030: ShowSceneGraph, explicit
+opcodes 0x20031-0x3ffff unused
 
 Segment 4:
 (not implemented yet)
@@ -451,5 +453,11 @@ op 0x2000302: Fixme
 op 0x2000303: Fixme, explicit
 op 0x2000304: Show
 op 0x2000305: Show, explicit
+op 0x2000306: OnActivate, explicit
+op 0x2000307: ToggleBorders, tb
+op 0x2000308: ToggleNavMesh
+op 0x2000309: ToggleActorsPaths
+op 0x200030a: SetNavMeshNumber
+op 0x200030b: Journal, explicit
 
-opcodes 0x2000304-0x3ffffff unused
+opcodes 0x200030c-0x3ffffff unused

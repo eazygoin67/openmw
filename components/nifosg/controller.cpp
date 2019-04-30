@@ -6,11 +6,10 @@
 #include <osg/Texture2D>
 #include <osg/UserDataContainer>
 
-#include <osgAnimation/MorphGeometry>
-
 #include <osgParticle/Emitter>
 
 #include <components/nif/data.hpp>
+#include <components/sceneutil/morphgeometry.hpp>
 
 #include "userdata.hpp"
 
@@ -188,7 +187,7 @@ GeomMorpherController::GeomMorpherController(const Nif::NiMorphData *data)
 
 void GeomMorpherController::update(osg::NodeVisitor *nv, osg::Drawable *drawable)
 {
-    osgAnimation::MorphGeometry* morphGeom = static_cast<osgAnimation::MorphGeometry*>(drawable);
+    SceneUtil::MorphGeometry* morphGeom = static_cast<SceneUtil::MorphGeometry*>(drawable);
     if (hasInput())
     {
         if (mKeyFrames.size() <= 1)
@@ -202,7 +201,7 @@ void GeomMorpherController::update(osg::NodeVisitor *nv, osg::Drawable *drawable
                 val = it->interpKey(input);
             val = std::max(0.f, std::min(1.f, val));
 
-            osgAnimation::MorphGeometry::MorphTarget& target = morphGeom->getMorphTarget(i);
+            SceneUtil::MorphGeometry::MorphTarget& target = morphGeom->getMorphTarget(i);
             if (target.getWeight() != val)
             {
                 target.setWeight(val);
@@ -210,15 +209,13 @@ void GeomMorpherController::update(osg::NodeVisitor *nv, osg::Drawable *drawable
             }
         }
     }
-
-    // morphGeometry::transformSoftwareMethod() done in cull callback i.e. only for visible morph geometries
 }
 
 UVController::UVController()
 {
 }
 
-UVController::UVController(const Nif::NiUVData *data, std::set<int> textureUnits)
+UVController::UVController(const Nif::NiUVData *data, const std::set<int>& textureUnits)
     : mUTrans(data->mKeyList[0], 0.f)
     , mVTrans(data->mKeyList[1], 0.f)
     , mUScale(data->mKeyList[2], 1.f)
@@ -312,6 +309,47 @@ void VisController::operator() (osg::Node* node, osg::NodeVisitor* nv)
     traverse(node, nv);
 }
 
+RollController::RollController(const Nif::NiFloatData *data)
+    : mData(data->mKeyList, 1.f)
+    , mStartingTime(0)
+{
+}
+
+RollController::RollController() : mStartingTime(0)
+{
+}
+
+RollController::RollController(const RollController &copy, const osg::CopyOp &copyop)
+    : osg::NodeCallback(copy, copyop)
+    , Controller(copy)
+    , mData(copy.mData)
+    , mStartingTime(0)
+{
+}
+
+void RollController::operator() (osg::Node* node, osg::NodeVisitor* nv)
+{
+    traverse(node, nv);
+
+    if (hasInput())
+    {
+        double newTime = nv->getFrameStamp()->getSimulationTime();
+        double duration = newTime - mStartingTime;
+        mStartingTime = newTime;
+
+        float value = mData.interpKey(getInputValue(nv));
+        osg::MatrixTransform* transform = static_cast<osg::MatrixTransform*>(node);
+        osg::Matrix matrix = transform->getMatrix();
+
+        // Rotate around "roll" axis.
+        // Note: in original game rotation speed is the framerate-dependent in a very tricky way.
+        // Do not replicate this behaviour until we will really need it.
+        // For now consider controller's current value as an angular speed in radians per 1/60 seconds.
+        matrix = osg::Matrix::rotate(value * duration * 60.f, 0, 0, 1) * matrix;
+        transform->setMatrix(matrix);
+    }
+}
+
 AlphaController::AlphaController(const Nif::NiFloatData *data)
     : mData(data->mKeyList, 1.f)
 {
@@ -381,14 +419,14 @@ void MaterialColorController::apply(osg::StateSet *stateset, osg::NodeVisitor *n
     }
 }
 
-FlipController::FlipController(const Nif::NiFlipController *ctrl, std::vector<osg::ref_ptr<osg::Texture2D> > textures)
+FlipController::FlipController(const Nif::NiFlipController *ctrl, const std::vector<osg::ref_ptr<osg::Texture2D> >& textures)
     : mTexSlot(ctrl->mTexSlot)
     , mDelta(ctrl->mDelta)
     , mTextures(textures)
 {
 }
 
-FlipController::FlipController(int texSlot, float delta, std::vector<osg::ref_ptr<osg::Texture2D> > textures)
+FlipController::FlipController(int texSlot, float delta, const std::vector<osg::ref_ptr<osg::Texture2D> >& textures)
     : mTexSlot(texSlot)
     , mDelta(delta)
     , mTextures(textures)
@@ -412,7 +450,7 @@ FlipController::FlipController(const FlipController &copy, const osg::CopyOp &co
 
 void FlipController::apply(osg::StateSet* stateset, osg::NodeVisitor* nv)
 {
-    if (hasInput() && mDelta != 0)
+    if (hasInput() && mDelta != 0 && !mTextures.empty())
     {
         int curTexture = int(getInputValue(nv) / mDelta) % mTextures.size();
         stateset->setTextureAttribute(mTexSlot, mTextures[curTexture]);

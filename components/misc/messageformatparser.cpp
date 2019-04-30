@@ -34,28 +34,30 @@ namespace Misc
 
                         if (i < m.size())
                         {
-                            int precision = 0;
-                            bool precisionSet = false;
+                            int precision = -1;
                             if (m[i] == '.')
                             {
+                                precision = 0;
                                 while (++i < m.size() && m[i] >= '0' && m[i] <= '9')
                                 {
                                     precision = precision * 10 + (m[i] - '0');
-                                    precisionSet = true;
                                 }
                             }
 
                             if (i < m.size())
                             {
                                 width = (widthSet) ? width : -1;
-                                precision = (precisionSet) ? precision : -1;
 
                                 if (m[i] == 'S' || m[i] == 's')
-                                    visitedPlaceholder(StringPlaceholder, pad, width, precision);
-                                else if (m[i] == 'g' || m[i] == 'G')
-                                    visitedPlaceholder(IntegerPlaceholder, pad, width, precision);
+                                    visitedPlaceholder(StringPlaceholder, pad, width, precision, FixedNotation);
+                                else if (m[i] == 'd' || m[i] == 'i')
+                                    visitedPlaceholder(IntegerPlaceholder, pad, width, precision, FixedNotation);
                                 else if (m[i] == 'f' || m[i] == 'F')
-                                    visitedPlaceholder(FloatPlaceholder, pad, width, precision);
+                                    visitedPlaceholder(FloatPlaceholder, pad, width, precision, FixedNotation);
+                                else if (m[i] == 'e' || m[i] == 'E')
+                                    visitedPlaceholder(FloatPlaceholder, pad, width, precision, ScientificNotation);
+                                else if (m[i] == 'g' || m[i] == 'G')
+                                    visitedPlaceholder(FloatPlaceholder, pad, width, precision, ShortestNotation);
                             }
                         }
                     }

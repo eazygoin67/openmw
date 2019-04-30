@@ -1,8 +1,9 @@
 #include "obstacle.hpp"
 
-#include <components/esm/loadcell.hpp>
+#include <components/sceneutil/positionattitudetransform.hpp>
 
 #include "../mwbase/world.hpp"
+#include "../mwbase/environment.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/cellstore.hpp"
 
@@ -23,50 +24,57 @@ namespace MWMechanics
         { -1.0f, -1.0f }    // move to side and backwards
     };
 
-    // Proximity check function for interior doors.  Given that most interior cells
-    // do not have many doors performance shouldn't be too much of an issue.
-    //
-    // Limitation: there can be false detections, and does not test whether the
-    // actor is facing the door.
-    bool proximityToDoor(const MWWorld::Ptr& actor, float minSqr)
+    bool proximityToDoor(const MWWorld::Ptr& actor, float minDist)
     {
-        if(getNearbyDoor(actor, minSqr)!=MWWorld::Ptr())
-            return true;
-        else
+        if(getNearbyDoor(actor, minDist).isEmpty())
             return false;
+        else
+            return true;
     }
 
-    MWWorld::Ptr getNearbyDoor(const MWWorld::Ptr& actor, float minSqr)
+    const MWWorld::Ptr getNearbyDoor(const MWWorld::Ptr& actor, float minDist)
     {
         MWWorld::CellStore *cell = actor.getCell();
-
-        if(cell->getCell()->isExterior())
-            return MWWorld::Ptr(); // check interior cells only
 
         // Check all the doors in this cell
         const MWWorld::CellRefList<ESM::Door>& doors = cell->getReadOnlyDoors();
         const MWWorld::CellRefList<ESM::Door>::List& refList = doors.mList;
         MWWorld::CellRefList<ESM::Door>::List::const_iterator it = refList.begin();
         osg::Vec3f pos(actor.getRefData().getPosition().asVec3());
+        pos.z() = 0;
 
-        /// TODO: How to check whether the actor is facing a door? Below code is for
-        ///       the player, perhaps it can be adapted.
-        //MWWorld::Ptr ptr = MWBase::Environment::get().getWorld()->getFacedObject();
-        //if(!ptr.isEmpty())
-            //std::cout << "faced door " << ptr.getClass().getName(ptr) << std::endl;
+        osg::Vec3f actorDir = (actor.getRefData().getBaseNode()->getAttitude() * osg::Vec3f(0,1,0));
 
-        /// TODO: The in-game observation of rot[2] value seems to be the
-        ///       opposite of the code in World::activateDoor() ::confused::
         for (; it != refList.end(); ++it)
         {
             const MWWorld::LiveCellRef<ESM::Door>& ref = *it;
-            if((pos - ref.mData.getPosition().asVec3()).length2() < minSqr
-                    && ref.mData.getPosition().rot[2] == ref.mRef.getPosition().rot[2])
-            {
-                // FIXME cast
-                return MWWorld::Ptr(&const_cast<MWWorld::LiveCellRef<ESM::Door> &>(ref), actor.getCell()); // found, stop searching
-            }
+
+            osg::Vec3f doorPos(ref.mData.getPosition().asVec3());
+
+            // FIXME: cast
+            const MWWorld::Ptr doorPtr = MWWorld::Ptr(&const_cast<MWWorld::LiveCellRef<ESM::Door> &>(ref), actor.getCell());
+
+            int doorState = doorPtr.getClass().getDoorState(doorPtr);
+            float doorRot = ref.mData.getPosition().rot[2] - doorPtr.getCellRef().getPosition().rot[2];
+
+            if (doorState != 0 || doorRot != 0)
+                continue; // the door is already opened/opening
+
+            doorPos.z() = 0;
+
+            float angle = std::acos(actorDir * (doorPos - pos) / (actorDir.length() * (doorPos - pos).length()));
+
+            // Allow 60 degrees angle between actor and door
+            if (angle < -osg::PI / 3 || angle > osg::PI / 3)
+                continue;
+
+            // Door is not close enough
+            if ((pos - doorPos).length2() > minDist*minDist)
+                continue;
+
+            return doorPtr; // found, stop searching
         }
+
         return MWWorld::Ptr(); // none found
     }
 
@@ -86,11 +94,6 @@ namespace MWMechanics
         mWalkState = State_Norm;
         mStuckDuration = 0;
         mEvadeDuration = 0;
-    }
-
-    bool ObstacleCheck::isNormalState() const
-    {
-        return mWalkState == State_Norm;
     }
 
     bool ObstacleCheck::isEvading() const
@@ -120,17 +123,19 @@ namespace MWMechanics
      * u = how long to move sideways
      *
      */
-    bool ObstacleCheck::check(const MWWorld::Ptr& actor, float duration, float scaleMinimumDistance)
+    void ObstacleCheck::update(const MWWorld::Ptr& actor, float duration)
     {
-        const MWWorld::Class& cls = actor.getClass();
-        ESM::Position pos = actor.getRefData().getPosition();
+        const ESM::Position pos = actor.getRefData().getPosition();
 
-        if(mDistSameSpot == -1)
-            mDistSameSpot = DIST_SAME_SPOT * cls.getSpeed(actor) * scaleMinimumDistance;
+        if (mDistSameSpot == -1)
+        {
+            const osg::Vec3f halfExtents = MWBase::Environment::get().getWorld()->getHalfExtents(actor);
+            mDistSameSpot = DIST_SAME_SPOT * actor.getClass().getSpeed(actor) + 1.2 * std::max(halfExtents.x(), halfExtents.y());
+        }
 
-        float distSameSpot = mDistSameSpot * duration;
-
-        bool samePosition =  (osg::Vec2f(pos.pos[0], pos.pos[1]) - osg::Vec2f(mPrevX, mPrevY)).length2() <  distSameSpot * distSameSpot;
+        const float distSameSpot = mDistSameSpot * duration;
+        const float squaredMovedDistance = (osg::Vec2f(pos.pos[0], pos.pos[1]) - osg::Vec2f(mPrevX, mPrevY)).length2();
+        const bool samePosition = squaredMovedDistance < distSameSpot * distSameSpot;
 
         // update position
         mPrevX = pos.pos[0];
@@ -172,9 +177,7 @@ namespace MWMechanics
             case State_Evade:
             {
                 mEvadeDuration += duration;
-                if(mEvadeDuration < DURATION_TO_EVADE)
-                    return true;
-                else
+                if(mEvadeDuration >= DURATION_TO_EVADE)
                 {
                     // tried to evade, assume all is ok and start again
                     mWalkState = State_Norm;
@@ -183,10 +186,9 @@ namespace MWMechanics
             }
             /* NO DEFAULT CASE */
         }
-        return false; // no obstacles to evade (yet)
     }
 
-    void ObstacleCheck::takeEvasiveAction(MWMechanics::Movement& actorMovement)
+    void ObstacleCheck::takeEvasiveAction(MWMechanics::Movement& actorMovement) const
     {
         actorMovement.mPosition[0] = evadeDirections[mEvadeDirectionIndex][0];
         actorMovement.mPosition[1] = evadeDirections[mEvadeDirectionIndex][1];

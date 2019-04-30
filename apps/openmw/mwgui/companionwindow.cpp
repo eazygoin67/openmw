@@ -1,5 +1,7 @@
 #include "companionwindow.hpp"
 
+#include <cmath>
+
 #include <MyGUI_InputManager.h>
 
 #include "../mwbase/environment.hpp"
@@ -13,6 +15,7 @@
 #include "companionitemmodel.hpp"
 #include "draganddrop.hpp"
 #include "countdialog.hpp"
+#include "widgets.hpp"
 
 namespace
 {
@@ -34,8 +37,8 @@ namespace MWGui
 
 CompanionWindow::CompanionWindow(DragAndDrop *dragAndDrop, MessageBoxManager* manager)
     : WindowBase("openmw_companion_window.layout")
-    , mSortModel(NULL)
-    , mModel(NULL)
+    , mSortModel(nullptr)
+    , mModel(nullptr)
     , mSelectedItem(-1)
     , mDragAndDrop(dragAndDrop)
     , mMessageBoxManager(manager)
@@ -86,7 +89,7 @@ void CompanionWindow::onItemSelected(int index)
         dialog->eventOkClicked += MyGUI::newDelegate(this, &CompanionWindow::dragItem);
     }
     else
-        dragItem (NULL, count);
+        dragItem (nullptr, count);
 }
 
 void CompanionWindow::dragItem(MyGUI::Widget* sender, int count)
@@ -103,7 +106,7 @@ void CompanionWindow::onBackgroundSelected()
     }
 }
 
-void CompanionWindow::openCompanion(const MWWorld::Ptr& npc)
+void CompanionWindow::setPtr(const MWWorld::Ptr& npc)
 {
     mPtr = npc;
     updateEncumbranceBar();
@@ -116,8 +119,9 @@ void CompanionWindow::openCompanion(const MWWorld::Ptr& npc)
     setTitle(npc.getClass().getName(npc));
 }
 
-void CompanionWindow::onFrame()
+void CompanionWindow::onFrame(float dt)
 {
+    checkReferenceAvailable();
     updateEncumbranceBar();
 }
 
@@ -127,7 +131,7 @@ void CompanionWindow::updateEncumbranceBar()
         return;
     float capacity = mPtr.getClass().getCapacity(mPtr);
     float encumbrance = mPtr.getClass().getEncumbrance(mPtr);
-    mEncumbranceBar->setValue(static_cast<int>(encumbrance), static_cast<int>(capacity));
+    mEncumbranceBar->setValue(std::ceil(encumbrance), static_cast<int>(capacity));
 
     if (mModel && mModel->hasProfit(mPtr))
     {
@@ -139,10 +143,11 @@ void CompanionWindow::updateEncumbranceBar()
 
 void CompanionWindow::onCloseButtonClicked(MyGUI::Widget* _sender)
 {
-    exit();
+    if (exit())
+        MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Companion);
 }
 
-void CompanionWindow::exit()
+bool CompanionWindow::exit()
 {
     if (mModel && mModel->hasProfit(mPtr) && getProfit(mPtr) < 0)
     {
@@ -151,9 +156,9 @@ void CompanionWindow::exit()
         buttons.push_back("#{sCompanionWarningButtonTwo}");
         mMessageBoxManager->createInteractiveMessageBox("#{sCompanionWarningMessage}", buttons);
         mMessageBoxManager->eventButtonPressed += MyGUI::newDelegate(this, &CompanionWindow::onMessageBoxButtonClicked);
+        return false;
     }
-    else
-        MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Companion);
+    return true;
 }
 
 void CompanionWindow::onMessageBoxButtonClicked(int button)
@@ -162,7 +167,7 @@ void CompanionWindow::onMessageBoxButtonClicked(int button)
     {
         MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Companion);
         // Important for Calvus' contract script to work properly
-        MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Dialogue);
+        MWBase::Environment::get().getWindowManager()->exitCurrentGuiMode();
     }
 }
 
@@ -174,9 +179,9 @@ void CompanionWindow::onReferenceUnavailable()
 void CompanionWindow::resetReference()
 {
     ReferenceInterface::resetReference();
-    mItemView->setModel(NULL);
-    mModel = NULL;
-    mSortModel = NULL;
+    mItemView->setModel(nullptr);
+    mModel = nullptr;
+    mSortModel = nullptr;
 }
 
 

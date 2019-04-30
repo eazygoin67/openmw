@@ -4,7 +4,6 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
-#include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
 
 #include "../mwmechanics/creaturestats.hpp"
@@ -31,16 +30,20 @@ namespace MWClass
         if (!model.empty())
         {
             physics.addActor(ptr, model);
-            if (getCreatureStats(ptr).isDead())
+            if (getCreatureStats(ptr).isDead() && getCreatureStats(ptr).isDeathAnimationFinished())
                 MWBase::Environment::get().getWorld()->enableActorCollision(ptr, false);
         }
-        MWBase::Environment::get().getMechanicsManager()->add(ptr);
+    }
+
+    bool Actor::useAnim() const
+    {
+        return true;
     }
 
     void Actor::block(const MWWorld::Ptr &ptr) const
     {
-        MWWorld::InventoryStore& inv = getInventoryStore(ptr);
-        MWWorld::ContainerStoreIterator shield = inv.getSlot(MWWorld::InventoryStore::Slot_CarriedLeft);
+        const MWWorld::InventoryStore& inv = getInventoryStore(ptr);
+        MWWorld::ConstContainerStoreIterator shield = inv.getSlot(MWWorld::InventoryStore::Slot_CarriedLeft);
         if (shield == inv.end())
             return;
 

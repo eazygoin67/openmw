@@ -77,21 +77,30 @@ namespace MWDialogue
 
     void Journal::addEntry (const std::string& id, int index, const MWWorld::Ptr& actor)
     {
-        // bail out of we already have heard this...
+        // bail out if we already have heard this...
         std::string infoId = JournalEntry::idFromIndex (id, index);
         for (TEntryIter i = mJournal.begin (); i != mJournal.end (); ++i)
             if (i->mTopic == id && i->mInfoId == infoId)
+            {
+                if (getJournalIndex(id) < index)
+                {
+                    setJournalIndex(id, index);
+                    MWBase::Environment::get().getWindowManager()->messageBox ("#{sJournalEntry}");
+                }
                 return;
+            }
 
         StampedJournalEntry entry = StampedJournalEntry::makeFromQuest (id, index, actor);
 
-        mJournal.push_back (entry);
-
         Quest& quest = getQuest (id);
-
         quest.addEntry (entry); // we are doing slicing on purpose here
 
-        MWBase::Environment::get().getWindowManager()->messageBox ("#{sJournalEntry}");
+        // there is no need to show empty entries in journal
+        if (!entry.getText().empty())
+        {
+            mJournal.push_back (entry);
+            MWBase::Environment::get().getWindowManager()->messageBox ("#{sJournalEntry}");
+        }
     }
 
     void Journal::setJournalIndex (const std::string& id, int index)

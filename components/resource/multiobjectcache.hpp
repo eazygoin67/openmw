@@ -25,20 +25,25 @@ namespace Resource
 
         void removeUnreferencedObjectsInCache();
 
+        /** Remove all objects from the cache. */
+        void clear();
+
         void addEntryToObjectCache(const std::string& filename, osg::Object* object);
 
-        /** Take an Object from cache. Return NULL if no object found. */
+        /** Take an Object from cache. Return nullptr if no object found. */
         osg::ref_ptr<osg::Object> takeFromObjectCache(const std::string& fileName);
 
         /** call releaseGLObjects on all objects attached to the object cache.*/
         void releaseGLObjects(osg::State* state);
+
+        unsigned int getCacheSize() const;
 
     protected:
 
         typedef std::multimap<std::string, osg::ref_ptr<osg::Object> >             ObjectCacheMap;
 
         ObjectCacheMap                          _objectCache;
-        OpenThreads::Mutex                      _objectCacheMutex;
+        mutable OpenThreads::Mutex              _objectCacheMutex;
 
     };
 

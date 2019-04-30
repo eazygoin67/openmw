@@ -1,7 +1,8 @@
 #include "aiextensions.hpp"
 
 #include <stdexcept>
-#include <iostream>
+
+#include <components/debug/debuglog.hpp>
 
 #include <components/compiler/extensions.hpp>
 #include <components/compiler/opcodes.hpp>
@@ -50,7 +51,7 @@ namespace MWScript
 
                     MWMechanics::AiActivate activatePackage(objectID);
                     ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(activatePackage, ptr);
-                    std::cout << "AiActivate" << std::endl;
+                    Log(Debug::Info) << "AiActivate";
                 }
         };
 
@@ -78,7 +79,7 @@ namespace MWScript
                     MWMechanics::AiTravel travelPackage(x, y, z);
                     ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(travelPackage, ptr);
 
-                    std::cout << "AiTravel: " << x << ", " << y << ", " << z << std::endl;
+                    Log(Debug::Info) << "AiTravel: " << x << ", " << y << ", " << z;
                 }
         };
 
@@ -112,8 +113,7 @@ namespace MWScript
                     MWMechanics::AiEscort escortPackage(actorID, static_cast<int>(duration), x, y, z);
                     ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(escortPackage, ptr);
 
-                    std::cout << "AiEscort: " << x << ", " << y << ", " << z << ", " << duration
-                        << std::endl;
+                    Log(Debug::Info) << "AiEscort: " << x << ", " << y << ", " << z << ", " << duration;
                 }
         };
 
@@ -155,8 +155,7 @@ namespace MWScript
                     MWMechanics::AiEscort escortPackage(actorID, cellID, static_cast<int>(duration), x, y, z);
                     ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(escortPackage, ptr);
 
-                    std::cout << "AiEscort: " << x << ", " << y << ", " << z << ", " << duration
-                        << std::endl;
+                    Log(Debug::Info) << "AiEscort: " << x << ", " << y << ", " << z << ", " << duration;
                 }
         };
 
@@ -193,10 +192,18 @@ namespace MWScript
                     Interpreter::Type_Integer time = static_cast<Interpreter::Type_Integer>(runtime[0].mFloat);
                     runtime.pop();
 
+                    // Chance for Idle is unused
+                    if (arg0)
+                    {
+                        --arg0;
+                        runtime.pop();
+                    }
+
                     std::vector<unsigned char> idleList;
                     bool repeat = false;
 
-                    for(int i=1; i < 10 && arg0; ++i)
+                    // Chances for Idle2-Idle9
+                    for(int i=2; i<=9 && arg0; ++i)
                     {
                         if(!repeat)
                             repeat = true;
@@ -308,8 +315,7 @@ namespace MWScript
                     MWMechanics::AiFollow followPackage(actorID, duration, x, y ,z);
                     ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(followPackage, ptr);
 
-                    std::cout << "AiFollow: " << actorID << ", " << x << ", " << y << ", " << z << ", " << duration
-                        << std::endl;
+                    Log(Debug::Info) << "AiFollow: " << actorID << ", " << x << ", " << y << ", " << z << ", " << duration;
                 }
         };
 
@@ -345,8 +351,7 @@ namespace MWScript
 
                     MWMechanics::AiFollow followPackage(actorID, cellID, duration, x, y ,z);
                     ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(followPackage, ptr);
-                    std::cout << "AiFollow: " << actorID << ", " << x << ", " << y << ", " << z << ", " << duration
-                        << std::endl;
+                    Log(Debug::Info) << "AiFollow: " << actorID << ", " << x << ", " << y << ", " << z << ", " << duration;
                 }
         };
 
@@ -372,21 +377,14 @@ namespace MWScript
 
                 virtual void execute (Interpreter::Runtime& runtime)
                 {
-                    MWWorld::Ptr observer = R()(runtime);
+                    MWWorld::Ptr observer = R()(runtime, false); // required=false
+
                     std::string actorID = runtime.getStringLiteral (runtime[0].mInteger);
                     runtime.pop();
 
                     MWWorld::Ptr actor = MWBase::Environment::get().getWorld()->getPtr(actorID, true);
 
-                    if(!actor.getClass().isActor() || !observer.getClass().isActor())
-                    {
-                        runtime.push(0);
-                        return;
-                    }
-
-                    Interpreter::Type_Integer value =
-                            MWBase::Environment::get().getWorld()->getLOS(observer, actor) &&
-                            MWBase::Environment::get().getMechanicsManager()->awarenessCheck(actor, observer);
+                    Interpreter::Type_Integer value = MWBase::Environment::get().getMechanicsManager()->isActorDetected(actor, observer);
 
                     runtime.push (value);
                 }

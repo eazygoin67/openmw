@@ -56,8 +56,8 @@ namespace MWClass
             else if (creatureStats.isDead())
             {
                 const MWWorld::Store<ESM::GameSetting>& gmst = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
-                static const float fCorpseRespawnDelay = gmst.find("fCorpseRespawnDelay")->getFloat();
-                static const float fCorpseClearDelay = gmst.find("fCorpseClearDelay")->getFloat();
+                static const float fCorpseRespawnDelay = gmst.find("fCorpseRespawnDelay")->mValue.getFloat();
+                static const float fCorpseClearDelay = gmst.find("fCorpseClearDelay")->mValue.getFloat();
 
                 float delay = std::min(fCorpseRespawnDelay, fCorpseClearDelay);
                 if (creatureStats.getTimeOfDeath() + delay <= MWBase::Environment::get().getWorld()->getTimeStamp())
@@ -70,7 +70,7 @@ namespace MWClass
 
     void CreatureLevList::registerSelf()
     {
-        boost::shared_ptr<Class> instance (new CreatureLevList);
+        std::shared_ptr<Class> instance (new CreatureLevList);
 
         registerClass (typeid (ESM::CreatureLevList).name(), instance);
     }
@@ -132,7 +132,7 @@ namespace MWClass
     {
         if (!ptr.getRefData().getCustomData())
         {
-            std::auto_ptr<CreatureLevListCustomData> data (new CreatureLevListCustomData);
+            std::unique_ptr<CreatureLevListCustomData> data (new CreatureLevListCustomData);
             data->mSpawnActorId = -1;
             data->mSpawn = true;
 

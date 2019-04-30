@@ -16,8 +16,17 @@ namespace Gui
     public:
         MyGUI::IntSize getRequestedSize();
 
+        ImageButton();
+
+        static void setDefaultNeedKeyFocus(bool enabled);
+
         /// Set mImageNormal, mImageHighlighted and mImagePushed based on file convention (image_idle.ext, image_over.ext and image_pressed.ext)
         void setImage(const std::string& image);
+
+    private:
+        void updateImage();
+
+        static bool sDefaultNeedKeyFocus;
 
     protected:
         virtual void setPropertyOverride(const std::string& _key, const std::string& _value);
@@ -25,10 +34,16 @@ namespace Gui
         virtual void onMouseSetFocus(MyGUI::Widget* _old);
         virtual void onMouseButtonPressed(int _left, int _top, MyGUI::MouseButton _id);
         virtual void onMouseButtonReleased(int _left, int _top, MyGUI::MouseButton _id);
+        virtual void onKeySetFocus(MyGUI::Widget* _old);
+        virtual void onKeyLostFocus(MyGUI::Widget* _new);
 
         std::string mImageHighlighted;
         std::string mImageNormal;
         std::string mImagePushed;
+
+        bool mMouseFocus;
+        bool mMousePress;
+        bool mKeyFocus;
     };
 
 }

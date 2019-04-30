@@ -193,7 +193,8 @@ bool MWDialogue::Filter::testFunctionLocal(const MWDialogue::SelectWrapper& sele
         return false; // shouldn't happen, we checked that variable has a type above, so must exist
 
     const MWScript::Locals& locals = mActor.getRefData().getLocals();
-
+    if (locals.isEmpty())
+        return select.selectCompare(0);
     switch (type)
     {
         case 's': return select.selectCompare (static_cast<int> (locals.mShorts[index]));
@@ -344,13 +345,13 @@ int MWDialogue::Filter::getSelectStructInteger (const SelectWrapper& select) con
 
         case SelectWrapper::Function_PcClothingModifier:
         {
-            MWWorld::InventoryStore& store = player.getClass().getInventoryStore (player);
+            const MWWorld::InventoryStore& store = player.getClass().getInventoryStore (player);
 
             int value = 0;
 
             for (int i=0; i<=15; ++i) // everything except things held in hands and ammunition
             {
-                MWWorld::ContainerStoreIterator slot = store.getSlot (i);
+                MWWorld::ConstContainerStoreIterator slot = store.getSlot (i);
 
                 if (slot!=store.end())
                     value += slot->getClass().getValue (*slot);
@@ -490,10 +491,11 @@ bool MWDialogue::Filter::getSelectStructBoolean (const SelectWrapper& select) co
             return !Misc::StringUtils::ciEqual(mActor.get<ESM::NPC>()->mBase->mRace, select.getName());
 
         case SelectWrapper::Function_NotCell:
-
-            return !Misc::StringUtils::ciEqual(MWBase::Environment::get().getWorld()->getCellName(mActor.getCell())
-                                               , select.getName());
-
+            {
+                const std::string& actorCell = MWBase::Environment::get().getWorld()->getCellName(mActor.getCell());
+                return !(actorCell.length() >= select.getName().length()
+                      && Misc::StringUtils::ciEqual(actorCell.substr(0, select.getName().length()), select.getName()));
+            }
         case SelectWrapper::Function_SameGender:
 
             return (player.get<ESM::NPC>()->mBase->mFlags & ESM::NPC::Female)==
@@ -619,7 +621,7 @@ const ESM::DialInfo* MWDialogue::Filter::search (const ESM::Dialogue& dialogue, 
     std::vector<const ESM::DialInfo *> suitableInfos = list (dialogue, fallbackToInfoRefusal, false);
 
     if (suitableInfos.empty())
-        return NULL;
+        return nullptr;
     else
         return suitableInfos[0];
 }

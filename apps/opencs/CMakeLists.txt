@@ -18,7 +18,8 @@ opencs_hdrs_noqt (model/doc
 
 
 opencs_units (model/world
-    idtable idtableproxymodel regionmap data commanddispatcher idtablebase resourcetable nestedtableproxymodel idtree infotableproxymodel
+    idtable idtableproxymodel regionmap data commanddispatcher idtablebase resourcetable nestedtableproxymodel idtree infotableproxymodel landtexturetableproxymodel
+    actoradapter
     )
 
 
@@ -42,7 +43,7 @@ opencs_units_noqt (model/tools
     mandatoryid skillcheck classcheck factioncheck racecheck soundcheck regioncheck
     birthsigncheck spellcheck referencecheck referenceablecheck scriptcheck bodypartcheck
     startscriptcheck search searchoperation searchstage pathgridcheck soundgencheck magiceffectcheck
-    mergestages gmstcheck topicinfocheck journalcheck
+    mergestages gmstcheck topicinfocheck journalcheck enchantmentcheck
     )
 
 opencs_hdrs_noqt (model/tools
@@ -70,6 +71,7 @@ opencs_units (view/world
     cellcreator pathgridcreator referenceablecreator startscriptcreator referencecreator scenesubview
     infocreator scriptedit dialoguesubview previewsubview regionmap dragrecordtable nestedtable
     dialoguespinbox recordbuttonbar tableeditidaction scripterrortable extendedcommandconfigurator
+    bodypartcreator landtexturecreator landcreator
     )
 
 opencs_units_noqt (view/world
@@ -80,14 +82,14 @@ opencs_units_noqt (view/world
 
 opencs_units (view/widget
     scenetoolbar scenetool scenetoolmode pushbutton scenetooltoggle scenetoolrun modebutton
-    scenetooltoggle2 completerpopup coloreditor colorpickerpopup droplineedit
+    scenetooltoggle2 scenetooltexturebrush completerpopup coloreditor colorpickerpopup droplineedit
     )
 
 opencs_units (view/render
     scenewidget worldspacewidget pagedworldspacewidget unpagedworldspacewidget
     previewwidget editmode instancemode instanceselectionmode instancemovemode
     orbitcameramode pathgridmode selectionmode pathgridselectionmode cameracontroller
-    cellwater
+    cellwater terraintexturemode actor
     )
 
 opencs_units_noqt (view/render
@@ -109,7 +111,7 @@ opencs_units_noqt (view/tools
     )
 
 opencs_units (view/prefs
-    dialogue pagebase page keybindingpage
+    dialogue pagebase page keybindingpage contextmenulist
     )
 
 opencs_units (model/prefs
@@ -173,7 +175,7 @@ else()
     set (OPENCS_OPENMW_CFG "")
 endif(APPLE)
 
-add_executable(openmw-cs
+openmw_add_executable(openmw-cs
     MACOSX_BUNDLE
     ${OPENCS_SRC}
     ${OPENCS_UI_HDR}
@@ -198,7 +200,7 @@ if(APPLE)
         RUNTIME_OUTPUT_DIRECTORY "${OpenMW_BINARY_DIR}"
         OUTPUT_NAME ${OPENCS_BUNDLE_NAME}
         MACOSX_BUNDLE_ICON_FILE "openmw-cs.icns"
-        MACOSX_BUNDLE_BUNDLE_NAME "OpenCS"
+        MACOSX_BUNDLE_BUNDLE_NAME "OpenMW-CS"
         MACOSX_BUNDLE_GUI_IDENTIFIER "org.openmw.opencs"
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${OPENMW_VERSION}
         MACOSX_BUNDLE_BUNDLE_VERSION ${OPENMW_VERSION}
@@ -245,13 +247,14 @@ if (DESIRED_QT_VERSION MATCHES 4)
         target_link_libraries(openmw-cs ${QT_QTMAIN_LIBRARY})
     endif()
 else()
-    qt5_use_modules(openmw-cs Widgets Core Network OpenGL)
+    target_link_libraries(openmw-cs Qt5::Widgets Qt5::Core Qt5::Network Qt5::OpenGL)
 endif()
 
 if (WIN32)
     target_link_libraries(openmw-cs ${Boost_LOCALE_LIBRARY})
     INSTALL(TARGETS openmw-cs RUNTIME DESTINATION ".")
-    INSTALL(FILES "${OpenMW_BINARY_DIR}/openmw-cs.cfg" DESTINATION ".")
+    INSTALL(FILES "${OpenMW_BINARY_DIR}/Debug/openmw-cs.cfg" DESTINATION "." CONFIGURATIONS Debug)
+    INSTALL(FILES "${OpenMW_BINARY_DIR}/Release/openmw-cs.cfg" DESTINATION "." CONFIGURATIONS Release;RelWithDebInfo;MinSizeRel)
 endif()
 
 if (MSVC)

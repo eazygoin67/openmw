@@ -1,27 +1,28 @@
 #include "aipursue.hpp"
 
 #include <components/esm/aisequence.hpp>
-#include <components/esm/loadmgef.hpp>
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/world.hpp"
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/action.hpp"
 
 #include "movement.hpp"
 #include "creaturestats.hpp"
+#include "combat.hpp"
 
 namespace MWMechanics
 {
 
 AiPursue::AiPursue(const MWWorld::Ptr& actor)
-    : mTargetActorId(actor.getClass().getCreatureStats(actor).getActorId())
 {
+    mTargetActorId = actor.getClass().getCreatureStats(actor).getActorId();
 }
 
 AiPursue::AiPursue(const ESM::AiSequence::AiPursue *pursue)
-    : mTargetActorId(pursue->mTargetActorId)
 {
+    mTargetActorId = pursue->mTargetActorId;
 }
 
 AiPursue *MWMechanics::AiPursue::clone() const
@@ -35,23 +36,28 @@ bool AiPursue::execute (const MWWorld::Ptr& actor, CharacterController& characte
 
     const MWWorld::Ptr target = MWBase::Environment::get().getWorld()->searchPtrViaActorId(mTargetActorId); //The target to follow
 
-    if(target == MWWorld::Ptr() || !target.getRefData().getCount() || !target.getRefData().isEnabled()  // Really we should be checking whether the target is currently registered
-                                                                                                        // with the MechanicsManager
-            )
-        return true; //Target doesn't exist
+    // Stop if the target doesn't exist
+    // Really we should be checking whether the target is currently registered with the MechanicsManager
+    if (target == MWWorld::Ptr() || !target.getRefData().getCount() || !target.getRefData().isEnabled())
+        return true;
 
     if (isTargetMagicallyHidden(target))
         return true;
 
-    if(target.getClass().getCreatureStats(target).isDead())
+    if (target.getClass().getCreatureStats(target).isDead())
         return true;
 
     actor.getClass().getCreatureStats(actor).setDrawState(DrawState_Nothing);
 
-    //Set the target desition from the actor
-    ESM::Pathgrid::Point dest = target.getRefData().getPosition().pos;
+    //Set the target destination
+    const osg::Vec3f dest = target.getRefData().getPosition().asVec3();
+    const osg::Vec3f actorPos = actor.getRefData().getPosition().asVec3();
 
-    if (pathTo(actor, dest, duration, 100)) {
+    const float pathTolerance = 100.f;
+
+    if (pathTo(actor, dest, duration, pathTolerance) &&
+        std::abs(dest.z() - actorPos.z()) < pathTolerance) // check the true distance in case the target is far away in Z-direction
+    {
         target.getClass().activate(target,actor).get()->execute(actor); //Arrest player when reached
         return true;
     }
@@ -73,7 +79,7 @@ MWWorld::Ptr AiPursue::getTarget() const
 
 void AiPursue::writeState(ESM::AiSequence::AiSequence &sequence) const
 {
-    std::auto_ptr<ESM::AiSequence::AiPursue> pursue(new ESM::AiSequence::AiPursue());
+    std::unique_ptr<ESM::AiSequence::AiPursue> pursue(new ESM::AiSequence::AiPursue());
     pursue->mTargetActorId = mTargetActorId;
 
     ESM::AiSequence::AiPackageContainer package;

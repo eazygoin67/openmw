@@ -1,21 +1,14 @@
-#include <iostream>
-#include <cstdio>
-
 #include <components/version/version.hpp>
 #include <components/files/configurationmanager.hpp>
 #include <components/files/escape.hpp>
+#include <components/fallback/fallback.hpp>
 #include <components/fallback/validate.hpp>
+#include <components/debug/debugging.hpp>
+#include <components/misc/rng.hpp>
 
-#include <SDL_messagebox.h>
-#include <SDL_main.h>
 #include "engine.hpp"
 
-#include <boost/iostreams/concepts.hpp>
-#include <boost/iostreams/stream_buffer.hpp>
-#include <boost/filesystem/fstream.hpp>
-
 #if defined(_WIN32)
-// For OutputDebugString
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -24,20 +17,10 @@
 #include <cstdlib>
 #endif
 
-
-#if (defined(__APPLE__) || (defined(__linux)  &&  !defined(ANDROID)) || (defined(__unix) &&  !defined(ANDROID)) || defined(__posix))
-    #define USE_CRASH_CATCHER 1
-#else
-    #define USE_CRASH_CATCHER 0
+#if (defined(__APPLE__) || defined(__linux) || defined(__unix) || defined(__posix))
+#include <unistd.h>
 #endif
 
-#if USE_CRASH_CATCHER
-#include <csignal>
-extern int cc_install_handlers(int argc, char **argv, int num_signals, int *sigs, const char *logfile, int (*user_info)(char*, char*));
-extern int is_debugger_attached(void);
-#endif
-
-#include <boost/version.hpp>
 /**
  * Workaround for problems with whitespaces in paths in older versions of Boost library
  */
@@ -98,9 +81,6 @@ bool parseOptions (int argc, char** argv, OMW::Engine& engine, Files::Configurat
         ("no-sound", bpo::value<bool>()->implicit_value(true)
             ->default_value(false), "disable all sounds")
 
-        ("script-verbose", bpo::value<bool>()->implicit_value(true)
-            ->default_value(false), "verbose script output")
-
         ("script-all", bpo::value<bool>()->implicit_value(true)
             ->default_value(false), "compile all scripts (excluding dialogue scripts) at startup")
 
@@ -148,12 +128,17 @@ bool parseOptions (int argc, char** argv, OMW::Engine& engine, Files::Configurat
             ("fallback", bpo::value<FallbackMap>()->default_value(FallbackMap(), "")
             ->multitoken()->composing(), "fallback values")
 
-        ("no-grab", "Don't grab mouse cursor")
+        ("no-grab", bpo::value<bool>()->implicit_value(true)->default_value(false), "Don't grab mouse cursor")
 
         ("export-fonts", bpo::value<bool>()->implicit_value(true)
             ->default_value(false), "Export Morrowind .fnt fonts to PNG image and XML file in current directory")
 
-        ("activate-dist", bpo::value <int> ()->default_value (-1), "activation distance override");
+        ("activate-dist", bpo::value <int> ()->default_value (-1), "activation distance override")
+
+        ("random-seed", bpo::value <unsigned int> ()
+            ->default_value(Misc::Rng::generateDefaultSeed()),
+            "seed value for random number generator")
+    ;
 
     bpo::parsed_options valid_opts = bpo::command_line_parser(argc, argv)
         .options(desc).allow_unregistered().run();
@@ -184,7 +169,7 @@ bool parseOptions (int argc, char** argv, OMW::Engine& engine, Files::Configurat
     Version::Version v = Version::getOpenmwVersion(variables["resources"].as<Files::EscapeHashString>().toStdString());
     std::cout << v.describe() << std::endl;
 
-    engine.setGrabMouse(!variables.count("no-grab"));
+    engine.setGrabMouse(!variables["no-grab"].as<bool>());
 
     // Font encoding settings
     std::string encoding(variables["encoding"].as<Files::EscapeHashString>().toStdString());
@@ -199,6 +184,9 @@ bool parseOptions (int argc, char** argv, OMW::Engine& engine, Files::Configurat
     std::string local(variables["data-local"].as<Files::EscapeHashString>().toStdString());
     if (!local.empty())
     {
+        if (local.front() == '\"')
+            local = local.substr(1, local.length() - 2);
+
         dataDirs.push_back(Files::PathContainer::value_type(local));
     }
 
@@ -218,8 +206,8 @@ bool parseOptions (int argc, char** argv, OMW::Engine& engine, Files::Configurat
     StringsVector content = variables["content"].as<Files::EscapeStringVector>().toStdStringVector();
     if (content.empty())
     {
-      std::cout << "No content file given (esm/esp, nor omwgame/omwaddon). Aborting..." << std::endl;
-      return false;
+        Log(Debug::Error) << "No content file given (esm/esp, nor omwgame/omwaddon). Aborting...";
+        return false;
     }
 
     StringsVector::const_iterator it(content.begin());
@@ -233,12 +221,11 @@ bool parseOptions (int argc, char** argv, OMW::Engine& engine, Files::Configurat
     engine.setCell(variables["start"].as<Files::EscapeHashString>().toStdString());
     engine.setSkipMenu (variables["skip-menu"].as<bool>(), variables["new-game"].as<bool>());
     if (!variables["skip-menu"].as<bool>() && variables["new-game"].as<bool>())
-        std::cerr << "new-game used without skip-menu -> ignoring it" << std::endl;
+        Log(Debug::Warning) << "Warning: new-game used without skip-menu -> ignoring it";
 
     // scripts
     engine.setCompileAll(variables["script-all"].as<bool>());
     engine.setCompileAllDialogue(variables["script-all-dialogue"].as<bool>());
-    engine.setScriptsVerbosity(variables["script-verbose"].as<bool>());
     engine.setScriptConsoleMode (variables["script-console"].as<bool>());
     engine.setStartupScript (variables["script-run"].as<Files::EscapeHashString>().toStdString());
     engine.setWarningsMode (variables["script-warn"].as<int>());
@@ -247,139 +234,42 @@ bool parseOptions (int argc, char** argv, OMW::Engine& engine, Files::Configurat
     engine.setSaveGameFile (variables["load-savegame"].as<Files::EscapeHashString>().toStdString());
 
     // other settings
+    Fallback::Map::init(variables["fallback"].as<FallbackMap>().mMap);
     engine.setSoundUsage(!variables["no-sound"].as<bool>());
-    engine.setFallbackValues(variables["fallback"].as<FallbackMap>().mMap);
     engine.setActivationDistanceOverride (variables["activate-dist"].as<int>());
     engine.enableFontExport(variables["export-fonts"].as<bool>());
+    engine.setRandomSeed(variables["random-seed"].as<unsigned int>());
 
     return true;
 }
 
-#if defined(_WIN32) && defined(_DEBUG)
-
-class DebugOutput : public boost::iostreams::sink
+int runApplication(int argc, char *argv[])
 {
-public:
-    std::streamsize write(const char *str, std::streamsize size)
-    {
-        // Make a copy for null termination
-        std::string tmp (str, static_cast<unsigned int>(size));
-        // Write string to Visual Studio Debug output
-        OutputDebugString (tmp.c_str ());
-        return size;
-    }
-};
-#else
-class Tee : public boost::iostreams::sink
-{
-public:
-    Tee(std::ostream &stream, std::ostream &stream2)
-        : out(stream), out2(stream2)
-    {
-    }
-
-    std::streamsize write(const char *str, std::streamsize size)
-    {
-        out.write (str, size);
-        out.flush();
-        out2.write (str, size);
-        out2.flush();
-        return size;
-    }
-
-private:
-    std::ostream &out;
-    std::ostream &out2;
-};
-#endif
-
-int main(int argc, char**argv)
-{
-#if defined(__APPLE__)
+#ifdef __APPLE__
+    boost::filesystem::path binary_path = boost::filesystem::system_complete(boost::filesystem::path(argv[0]));
+    boost::filesystem::current_path(binary_path.parent_path());
     setenv("OSG_GL_TEXTURE_STORAGE", "OFF", 0);
 #endif
 
-    // Some objects used to redirect cout and cerr
-    // Scope must be here, so this still works inside the catch block for logging exceptions
-    std::streambuf* cout_rdbuf = std::cout.rdbuf ();
-    std::streambuf* cerr_rdbuf = std::cerr.rdbuf ();
+    Files::ConfigurationManager cfgMgr;
+    std::unique_ptr<OMW::Engine> engine;
+    engine.reset(new OMW::Engine(cfgMgr));
 
-#if !(defined(_WIN32) && defined(_DEBUG))
-    boost::iostreams::stream_buffer<Tee> coutsb;
-    boost::iostreams::stream_buffer<Tee> cerrsb;
-#endif
-
-    std::ostream oldcout(cout_rdbuf);
-    std::ostream oldcerr(cerr_rdbuf);
-
-    boost::filesystem::ofstream logfile;
-
-    std::auto_ptr<OMW::Engine> engine;
-
-    int ret = 0;
-    try
+    if (parseOptions(argc, argv, *engine, cfgMgr))
     {
-        Files::ConfigurationManager cfgMgr;
+        engine->go();
+    }
 
-#if defined(_WIN32) && defined(_DEBUG)
-        // Redirect cout and cerr to VS debug output when running in debug mode
-        boost::iostreams::stream_buffer<DebugOutput> sb;
-        sb.open(DebugOutput());
-        std::cout.rdbuf (&sb);
-        std::cerr.rdbuf (&sb);
+    return 0;
+}
+
+#ifdef ANDROID
+extern "C" int SDL_main(int argc, char**argv)
 #else
-        // Redirect cout and cerr to openmw.log
-        logfile.open (boost::filesystem::path(cfgMgr.getLogPath() / "/openmw.log"));
-
-        coutsb.open (Tee(logfile, oldcout));
-        cerrsb.open (Tee(logfile, oldcerr));
-
-        std::cout.rdbuf (&coutsb);
-        std::cerr.rdbuf (&cerrsb);
+int main(int argc, char**argv)
 #endif
-
-
-#if USE_CRASH_CATCHER
-        // Unix crash catcher
-        if ((argc == 2 && strcmp(argv[1], "--cc-handle-crash") == 0) || !is_debugger_attached())
-        {
-            int s[5] = { SIGSEGV, SIGILL, SIGFPE, SIGBUS, SIGABRT };
-            cc_install_handlers(argc, argv, 5, s, (cfgMgr.getLogPath() / "crash.log").string().c_str(), NULL);
-            std::cout << "Installing crash catcher" << std::endl;
-        }
-        else
-            std::cout << "Running in a debugger, not installing crash catcher" << std::endl;
-#endif
-
-#ifdef __APPLE__
-        boost::filesystem::path binary_path = boost::filesystem::system_complete(boost::filesystem::path(argv[0]));
-        boost::filesystem::current_path(binary_path.parent_path());
-#endif
-
-        engine.reset(new OMW::Engine(cfgMgr));
-
-        if (parseOptions(argc, argv, *engine, cfgMgr))
-        {
-            engine->go();
-        }
-    }
-    catch (std::exception &e)
-    {
-#if (defined(__APPLE__) || defined(__linux) || defined(__unix) || defined(__posix))
-        if (!isatty(fileno(stdin)))
-#endif
-            SDL_ShowSimpleMessageBox(0, "OpenMW: Fatal error", e.what(), NULL);
-
-        std::cerr << "\nERROR: " << e.what() << std::endl;
-
-        ret = 1;
-    }
-
-    // Restore cout and cerr
-    std::cout.rdbuf(cout_rdbuf);
-    std::cerr.rdbuf(cerr_rdbuf);
-
-    return ret;
+{
+    return wrapApplication(&runApplication, argc, argv, "OpenMW");
 }
 
 // Platform specific for Windows when there is no console built into the executable.
